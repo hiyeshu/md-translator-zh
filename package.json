@@ -1,0 +1,170 @@
+{
+	"name": "md-translator-zh",
+	"displayName": "Markdown 中文翻译器",
+	"description": "专业 Markdown 中文翻译工具。支持分栏预览、差异翻译、格式保护和多服务商接入。",
+	"version": "1.4.6",
+	"publisher": "yeshu",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/hiyeshu/md-translator-zh.git"
+	},
+	"bugs": {
+		"url": "https://github.com/hiyeshu/md-translator-zh/issues"
+	},
+	"homepage": "https://github.com/hiyeshu/md-translator-zh",
+	"engines": {
+		"vscode": "^1.74.0"
+	},
+	"categories": [
+		"Other",
+		"Formatters",
+		"Language Packs"
+	],
+	"keywords": [
+		"markdown",
+		"translator",
+		"simplified-chinese",
+		"简体中文",
+		"zh-cn",
+		"zh-hans",
+		"chinese",
+		"translation",
+		"documentation",
+		"i18n",
+		"localization",
+		"google-translate",
+		"azure-translate",
+		"custom-api",
+		"split-pane",
+		"delta-translation"
+	],
+	"activationEvents": [
+		"onLanguage:markdown"
+	],
+	"main": "./out/extension.js",
+	"browser": "./out/extension.js",
+	"icon": "assets/icon.png",
+	"contributes": {
+		"commands": [
+			{
+				"command": "mdcarrot.openViewer",
+				"title": "打开 Markdown 中文翻译器",
+				"category": "Markdown 中文翻译器",
+				"icon": "$(globe)"
+			},
+			{
+				"command": "mdcarrot.testConnection",
+				"title": "测试翻译服务连接",
+				"category": "Markdown 中文翻译器"
+			},
+			{
+				"command": "mdcarrot.clearCache",
+				"title": "清除翻译缓存",
+				"category": "Markdown 中文翻译器"
+			},
+			{
+				"command": "mdcarrot.clearProviderCache",
+				"title": "清除当前服务商缓存",
+				"category": "Markdown 中文翻译器"
+			},
+			{
+				"command": "mdcarrot.showCacheStats",
+				"title": "显示缓存统计",
+				"category": "Markdown 中文翻译器"
+			}
+		],
+		"menus": {
+			"explorer/context": [
+				{
+					"command": "mdcarrot.openViewer",
+					"when": "resourceExtname == .md",
+					"group": "navigation"
+				}
+			],
+			"editor/context": [
+				{
+					"command": "mdcarrot.openViewer",
+					"when": "resourceExtname == .md",
+					"group": "navigation"
+				}
+			],
+			"editor/title": [
+				{
+					"command": "mdcarrot.openViewer",
+					"when": "resourceExtname == .md",
+					"group": "navigation"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "mdcarrot.openViewer",
+				"key": "ctrl+shift+t",
+				"mac": "cmd+shift+t"
+			}
+		],
+		"configuration": {
+			"title": "Markdown 中文翻译器",
+			"properties": {
+				"mdcarrot.provider": {
+					"type": "string",
+					"default": "google",
+					"enum": [
+						"google",
+						"azure",
+						"custom"
+					],
+					"enumDescriptions": [
+						"Google Translate API",
+						"Microsoft Azure Translator",
+						"你自己的翻译接口"
+					],
+					"description": "选择翻译服务商"
+				},
+				"mdcarrot.google.apiKey": {
+					"type": "string",
+					"description": "Google Translate API Key（安全存储）",
+					"scope": "machine"
+				},
+				"mdcarrot.azure.key": {
+					"type": "string",
+					"description": "Azure Translator Key（安全存储）",
+					"scope": "machine"
+				},
+				"mdcarrot.azure.region": {
+					"type": "string",
+					"default": "eastus",
+					"description": "Azure 区域"
+				},
+				"mdcarrot.custom.endpoint": {
+					"type": "string",
+					"description": "自定义翻译 API 地址"
+				},
+				"mdcarrot.custom.token": {
+					"type": "string",
+					"description": "自定义翻译 API Token（可选）",
+					"scope": "machine"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"package": "vsce package --out dist/",
+		"clean": "rimraf out dist/*.vsix",
+		"prepackage": "npm run compile"
+	},
+	"devDependencies": {
+		"@types/vscode": "^1.74.0",
+		"@types/node": "16.x",
+		"typescript": "^4.9.4"
+	},
+	"dependencies": {},
+	"__metadata": {
+		"installedTimestamp": 1777046209243,
+		"targetPlatform": "universal",
+		"size": 144061
+	}
+}
