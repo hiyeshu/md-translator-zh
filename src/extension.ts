@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as vscode from 'vscode';
 import { Logger } from './logger';
 import { StatusBarManager } from './statusBar';
@@ -15,9 +14,8 @@ let lastActiveMarkdownFile: vscode.Uri | null = null;
 function getProviderLabel(providerName: string): string {
     const labels: Record<string, string> = {
         free: '免费',
+        volcengine: '火山引擎',
         google: 'Google',
-        azure: 'Azure',
-        custom: '自定义 API',
     };
     return labels[providerName] || providerName;
 }
@@ -115,17 +113,14 @@ async function testConnection(context: vscode.ExtensionContext) {
     statusBarManager?.showTranslating();
 
     try {
-        if (providerName === 'custom' || providerName === 'free') {
+        if (providerName === 'free') {
             await provider.translate('Connection test');
-            const message = providerName === 'free'
-                ? '免费可用。稳定性不保证。'
-                : '自定义 API 连接正常。';
-            vscode.window.showInformationMessage(message);
+            vscode.window.showInformationMessage('免费可用。稳定性不保证。');
             statusBarManager?.showReady();
             return;
         }
 
-        const quota = await provider.getQuota();
+        const quota = await provider.getQuota?.();
         if (quota?.error && !/不会在这里直接返回剩余额度|没有统一额度接口/.test(quota.error)) {
             throw new Error(quota.error);
         }

@@ -1,34 +1,36 @@
-// @ts-nocheck
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.StatusBarManager = void 0;
-const vscode = require("vscode");
-class StatusBarManager {
+import * as vscode from 'vscode';
+
+export class StatusBarManager {
+    private statusBarItem: vscode.StatusBarItem;
+
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         this.statusBarItem.command = 'mdcarrot.testConnection';
     }
-    showTranslating(progress) {
+
+    showTranslating(progress?: string): void {
         this.statusBarItem.text = `$(sync~spin) 正在翻译${progress ? ` ${progress}` : '...'}`;
         this.statusBarItem.tooltip = '正在翻译';
         this.statusBarItem.show();
     }
-    showReady() {
+
+    showReady(): void {
         this.statusBarItem.text = '$(globe) 中文翻译器';
         this.statusBarItem.tooltip = '点击测试翻译连接';
         this.statusBarItem.show();
     }
-    showError(message) {
+
+    showError(message: string): void {
         this.statusBarItem.text = '$(error) 翻译失败';
         this.statusBarItem.tooltip = message;
         this.statusBarItem.show();
     }
-    hide() {
+
+    hide(): void {
         this.statusBarItem.hide();
     }
-    dispose() {
+
+    dispose(): void {
         this.statusBarItem.dispose();
     }
 }
-exports.StatusBarManager = StatusBarManager;
-

@@ -1,20 +1,17 @@
-// @ts-nocheck
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.TranslationViewerProvider = void 0;
-const logger_1 = require("./logger");
-const vscode = require("vscode");
-const fs = require("fs");
-const translationManager_1 = require("./translationManager");
-const markdownProcessor_1 = require("./markdownProcessor");
-const config_1 = require("./config");
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Logger } from './logger';
+import { TranslationManager } from './translationManager';
+import { MarkdownProcessor, TextNode } from './markdownProcessor';
+import { getConfigValue, updateConfigValue } from './config';
+
 const DEFAULT_TARGET_LANGUAGE = 'zh-CN';
-function getProviderLabel(provider) {
-    const labels = {
+function getProviderLabel(provider: string): string {
+    const labels: Record<string, string> = {
         free: '免费',
+        volcengine: '火山引擎',
         google: 'Google',
-        azure: 'Azure',
-        custom: '自定义 API'
     };
     return labels[provider] || provider;
 }
@@ -24,11 +21,27 @@ function getTargetLanguageLabel() {
 function getTargetFileSuffix() {
     return `_${DEFAULT_TARGET_LANGUAGE}`;
 }
-class TranslationViewerProvider {
-    constructor(extensionUri, context) {
+export class TranslationViewerProvider {
+    static readonly DEBOUNCE_DELAY = 1000;
+
+    private extensionUri: vscode.Uri;
+    private context: vscode.ExtensionContext;
+    private markdownProcessor: MarkdownProcessor;
+    private isUpdating = false;
+    private disposables: vscode.Disposable[] = [];
+    private currentTranslatedContent = '';
+    private currentProvider = '';
+    private translationState: string = 'empty';
+    private currentFileContent = '';
+    private lastTranslatedNodes: TextNode[] = [];
+    translationManager: TranslationManager;
+    private panel?: vscode.WebviewPanel;
+    private currentFileUri?: vscode.Uri;
+    private updateTimeout?: ReturnType<typeof setTimeout>;
+    constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
         this.extensionUri = extensionUri;
         this.context = context;
-        this.markdownProcessor = new markdownProcessor_1.MarkdownProcessor();
+        this.markdownProcessor = new MarkdownProcessor();
         this.isUpdating = false;
         this.disposables = [];
         this.currentTranslatedContent = '';
@@ -36,14 +49,14 @@ class TranslationViewerProvider {
         this.translationState = 'empty';
         this.currentFileContent = '';
         this.lastTranslatedNodes = [];
-        this.translationManager = new translationManager_1.TranslationManager(context);
+        this.translationManager = new TranslationManager(context);
     }
     dispose() {
         this.cleanup();
         this.disposables.forEach(d => d.dispose());
         this.disposables = [];
     }
-    onFileChanged(uri) {
+    onFileChanged(uri: vscode.Uri) {
         if (this.currentFileUri &&
             uri.fsPath === this.currentFileUri.fsPath &&
             this.panel &&
@@ -54,7 +67,7 @@ class TranslationViewerProvider {
             }, TranslationViewerProvider.DEBOUNCE_DELAY);
         }
     }
-    async createOrShow(fileUri) {
+    async createOrShow(fileUri: vscode.Uri) {
         try {
             // Web-compatible file validation
             await vscode.workspace.fs.stat(fileUri);
@@ -86,7 +99,7 @@ class TranslationViewerProvider {
             await this.autoTranslate(fileUri);
         }, 800);
     }
-    async autoTranslate(fileUri) {
+    async autoTranslate(fileUri: vscode.Uri) {
         try {
             if (!this.panel)
                 return;
@@ -97,15 +110,15 @@ class TranslationViewerProvider {
             // Only auto-translate if we have content and no cached translation
             const content = fs.readFileSync(fileUri.fsPath, 'utf8');
             if (!this.translationManager.isFileCached(fileUri.fsPath, content)) {
-                logger_1.Logger.info('Auto-translating file on open...');
+                Logger.info('Auto-translating file on open...');
                 await this.updateContent(fileUri);
             }
         }
         catch (error) {
-            logger_1.Logger.error('Auto-translation failed:', error);
+            Logger.error('Auto-translation failed:', error instanceof Error ? error : undefined);
         }
     }
-    async handleWebviewMessage(message, fileUri) {
+    async handleWebviewMessage(message: { command: string; provider?: string; content?: string; query?: string; settings?: Record<string, string> }, fileUri: vscode.Uri) {
         try {
             switch (message.command) {
                 case 'save':
@@ -124,6 +137,38 @@ class TranslationViewerProvider {
                         await this.changeProvider(message.provider, fileUri);
                     }
                     break;
+                case 'getSettings':
+                    this.panel?.webview.postMessage({
+                        command: 'settingsData',
+                        settings: {
+                            provider: getConfigValue('provider', 'free'),
+                            'volcengine.accessKeyId': getConfigValue('volcengine.accessKeyId', ''),
+                            'volcengine.secretKey': getConfigValue('volcengine.secretKey', ''),
+                            'volcengine.region': getConfigValue('volcengine.region', 'cn-north-1'),
+                            'google.apiKey': getConfigValue('google.apiKey', ''),
+                            'free.googleMirror': getConfigValue('free.googleMirror', ''),
+                        }
+                    });
+                    break;
+                case 'saveSettings':
+                    if (message.settings) {
+                        for (const [key, value] of Object.entries(message.settings)) {
+                            await updateConfigValue(key, value, vscode.ConfigurationTarget.Global);
+                        }
+                        vscode.window.showInformationMessage('设置已保存');
+                        this.panel?.webview.postMessage({ command: 'settingsSaved' });
+                    }
+                    break;
+                case 'testConnection': {
+                    const provider = this.translationManager.getCurrentProviderInstance();
+                    try {
+                        await provider.translate('hello');
+                        this.panel?.webview.postMessage({ command: 'testResult', success: true, message: '连接正常' });
+                    } catch (e) {
+                        this.panel?.webview.postMessage({ command: 'testResult', success: false, message: e instanceof Error ? e.message : '连接失败' });
+                    }
+                    break;
+                }
                 case 'openSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', message.query || 'markdownTranslator');
                     break;
@@ -136,7 +181,7 @@ class TranslationViewerProvider {
             vscode.window.showErrorMessage(`操作失败：${errorMsg}`);
         }
     }
-    async forceRefresh(fileUri) {
+    async forceRefresh(fileUri: vscode.Uri) {
         // Clear file cache
         this.translationManager.clearFileCache(fileUri.fsPath);
         // Show loading state
@@ -146,9 +191,9 @@ class TranslationViewerProvider {
         await this.updateContentWithoutCache(fileUri);
     }
     getSelectedProvider() {
-        return (0, config_1.getConfigValue)('provider', 'free') || 'free';
+        return getConfigValue('provider', 'free') || 'free';
     }
-    async updateContentWithoutCache(fileUri) {
+    async updateContentWithoutCache(fileUri: vscode.Uri) {
         if (!this.panel || this.isUpdating)
             return;
         this.isUpdating = true;
@@ -208,8 +253,8 @@ class TranslationViewerProvider {
             this.isUpdating = false;
         }
     }
-    async changeProvider(provider, fileUri) {
-        await (0, config_1.updateConfigValue)('provider', provider, vscode.ConfigurationTarget.Global);
+    async changeProvider(provider: string, fileUri: vscode.Uri) {
+        await updateConfigValue('provider', provider, vscode.ConfigurationTarget.Global);
         const providerLabel = getProviderLabel(provider);
         // Check if switching back to the provider that created current content
         const isSameAsCurrentContent = (this.currentProvider === provider && this.translationState === 'translated');
@@ -229,10 +274,10 @@ class TranslationViewerProvider {
             this.updateMemoOnly(provider);
         }
     }
-    updateTranslationComplete(translatedMarkdown) {
+    updateTranslationComplete(translatedMarkdown: string) {
         this.translationState = 'translated';
         this.currentTranslatedContent = translatedMarkdown;
-        const provider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+        const provider = getConfigValue('provider', 'free') || 'free';
         this.currentProvider = provider; // This tracks which provider created the current content
         // Update memo to show completion
         if (this.panel) {
@@ -246,7 +291,7 @@ class TranslationViewerProvider {
     showLoadingState() {
         if (this.panel) {
             this.translationState = 'loading';
-            const currentProvider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+            const currentProvider: string = getConfigValue('provider', 'free') || 'free';
             this.panel.webview.postMessage({
                 command: 'updateMemo',
                 provider: currentProvider,
@@ -254,7 +299,7 @@ class TranslationViewerProvider {
             });
         }
     }
-    detectContentDeltas(oldContent, newContent) {
+    detectContentDeltas(oldContent: string, newContent: string) {
         if (!oldContent || !newContent) {
             return [];
         }
@@ -304,7 +349,7 @@ class TranslationViewerProvider {
         }
         return deltas;
     }
-    isSemanticBoundary(text) {
+    isSemanticBoundary(text: string) {
         const trimmed = text.trim();
         // Empty or whitespace-only
         if (!trimmed)
@@ -334,18 +379,17 @@ class TranslationViewerProvider {
             return false;
         return true;
     }
-    calculateCost(charCount) {
-        const provider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+    calculateCost(charCount: number) {
+        const provider = getConfigValue('provider', 'free') || 'free';
         // Cost per character by provider
         const costs = {
             'free': 0,
+            'volcengine': 0.0000035,
             'google': 0.00002,
-            'azure': 0.00001,
-            'custom': 0.00002
         };
         return charCount * (costs[provider] || costs.google);
     }
-    updateMemoToCompleted(provider) {
+    updateMemoToCompleted(provider: string) {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
@@ -354,7 +398,7 @@ class TranslationViewerProvider {
             });
         }
     }
-    updateMemoOnly(newProvider) {
+    updateMemoOnly(newProvider: string) {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
@@ -374,11 +418,10 @@ class TranslationViewerProvider {
         this.isUpdating = false;
         this.translationState = 'empty';
     }
-    getFileName(uri) {
-        const path = require('path');
+    getFileName(uri: vscode.Uri) {
         return path.basename(uri.fsPath) || 'Unknown';
     }
-    async updateContentDelta(fileUri) {
+    async updateContentDelta(fileUri: vscode.Uri) {
         if (!this.panel || this.isUpdating)
             return;
         this.isUpdating = true;
@@ -392,13 +435,13 @@ class TranslationViewerProvider {
             // Detect changes
             const deltas = this.detectContentDeltas(this.currentFileContent, newContent);
             if (deltas.length === 0) {
-                logger_1.Logger.debug('No content changes detected');
+                Logger.debug('No content changes detected');
                 return;
             }
             // Filter out non-semantic deltas and merge small adjacent changes
             const semanticDeltas = this.optimizeDeltas(deltas);
             if (semanticDeltas.length === 0) {
-                logger_1.Logger.debug('No semantic changes detected');
+                Logger.debug('No semantic changes detected');
                 return;
             }
             // Calculate cost savings
@@ -407,14 +450,14 @@ class TranslationViewerProvider {
             const savings = Math.round((1 - deltaChars / totalChars) * 100);
             // If savings are minimal, do full translation instead
             if (savings < 20) {
-                logger_1.Logger.debug('Delta savings too small, doing full translation');
+                Logger.debug('Delta savings too small, doing full translation');
                 await this.updateContent(fileUri);
                 return;
             }
-            logger_1.Logger.debug(`Delta translation: ${semanticDeltas.length} changes, ${deltaChars}/${totalChars} chars (${savings}% savings)`);
+            Logger.debug(`Delta translation: ${semanticDeltas.length} changes, ${deltaChars}/${totalChars} chars (${savings}% savings)`);
             // Show delta loading state with progress
             if (this.panel) {
-                const provider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+                const provider = getConfigValue('provider', 'free') || 'free';
                 this.panel.webview.postMessage({
                     command: 'updateMemo',
                     provider: provider,
@@ -426,7 +469,7 @@ class TranslationViewerProvider {
             // Translate only the deltas with progress updates
             const deltaTranslations = await this.translationManager.translateDeltasWithProgress(semanticDeltas, (completed, total) => {
                 if (this.panel) {
-                    const provider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+                    const provider = getConfigValue('provider', 'free') || 'free';
                     this.panel.webview.postMessage({
                         command: 'updateMemo',
                         provider: provider,
@@ -471,7 +514,7 @@ class TranslationViewerProvider {
             this.isUpdating = false;
         }
     }
-    optimizeDeltas(deltas) {
+    optimizeDeltas(deltas: { oldText: string; newText: string; semanticBoundary?: boolean; startIndex?: number; endIndex?: number }[]) {
         const optimized = [];
         for (const delta of deltas) {
             // Skip empty or whitespace-only changes
@@ -494,23 +537,22 @@ class TranslationViewerProvider {
         }
         return optimized.filter(delta => this.isSemanticBoundary(delta.newText));
     }
-    applyDeltaTranslations(content, deltas, translations) {
+    applyDeltaTranslations(content: string, deltas: { oldText: string; newText: string; startIndex?: number; endIndex?: number }[], translations: string[]) {
         const lines = content.split('\n');
         let translationIndex = 0;
         // Apply translations in reverse order to avoid index shifting
-        const sortedDeltas = [...deltas].sort((a, b) => b.startIndex - a.startIndex);
+        const sortedDeltas = [...deltas].sort((a, b) => (b.startIndex ?? 0) - (a.startIndex ?? 0));
         for (const delta of sortedDeltas) {
             if (translationIndex < translations.length) {
                 const translation = translations[translations.length - 1 - translationIndex];
-                // Replace the entire delta range with the translation
                 const translationLines = translation.split('\n');
-                lines.splice(delta.startIndex, delta.endIndex - delta.startIndex, ...translationLines);
+                lines.splice(delta.startIndex ?? 0, (delta.endIndex ?? 0) - (delta.startIndex ?? 0), ...translationLines);
                 translationIndex++;
             }
         }
         return lines.join('\n');
     }
-    async updateContent(fileUri) {
+    async updateContent(fileUri: vscode.Uri) {
         if (!this.panel || this.isUpdating)
             return;
         this.isUpdating = true;
@@ -582,11 +624,10 @@ class TranslationViewerProvider {
             this.isUpdating = false;
         }
     }
-    async saveTranslation(originalUri, content) {
+    async saveTranslation(originalUri: vscode.Uri, content: string) {
         if (!content || typeof content !== 'string') {
             throw new Error('Invalid content to save');
         }
-        const path = require('path');
         const originalPath = originalUri.fsPath;
         // Validate original file still exists
         if (!fs.existsSync(originalPath)) {
@@ -676,25 +717,20 @@ class TranslationViewerProvider {
         </body>
         </html>`;
     }
-    getErrorContent(error) {
-        const errorStr = this.escapeHtml(error);
-        const isKeyMissing = /还没配置|not configured/i.test(error);
-        const isKeyInvalid = /无效|invalid|403|额度/i.test(error);
-        const isCustom = /自定义/i.test(error);
+    getErrorContent(error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorStr = this.escapeHtml(errorMsg);
+        const isKeyMissing = /还没配置|not configured/i.test(errorMsg);
+        const isKeyInvalid = /无效|invalid|403|额度/i.test(errorMsg);
         let guideHtml = '';
-        if (isKeyMissing && isCustom) {
+        if (isKeyMissing) {
             guideHtml = `
-                <p class="hint">在 VS Code 设置里填入你的 API 地址就行。</p>
-                <button class="action" onclick="openSettings('markdownTranslator.custom.endpoint')">填写 API 地址</button>
-            `;
-        } else if (isKeyMissing) {
-            guideHtml = `
-                <p class="hint">在 VS Code 设置里填入 API Key 就能用了。</p>
-                <button class="action" onclick="openSettings('markdownTranslator')">去填 Key</button>
+                <p class="hint">在 VS Code 设置里把当前服务商的密钥填上就能用了。</p>
+                <button class="action" onclick="openSettings('markdownTranslator')">去填设置</button>
             `;
         } else if (isKeyInvalid) {
             guideHtml = `
-                <p class="hint">Key 可能过期或额度用完了，检查一下？</p>
+                <p class="hint">密钥可能过期、配错，或者额度用完了。</p>
                 <button class="action" onclick="openSettings('markdownTranslator')">检查设置</button>
                 <button class="action secondary" onclick="retry()">重试</button>
             `;
@@ -793,12 +829,12 @@ class TranslationViewerProvider {
         </body>
         </html>`;
     }
-    getWebviewContent(originalHtml, translatedHtml, translatedMarkdown) {
+    getWebviewContent(originalHtml: string, translatedHtml: string, translatedMarkdown: string) {
         const cleanMarkdown = translatedMarkdown;
         const markdownSourceHtml = this.renderMarkdownSource(cleanMarkdown);
         const markdownLineCount = cleanMarkdown.split('\n').length;
         const markdownGutterWidth = Math.max(44, 18 + String(markdownLineCount).length * 10);
-        const currentProvider = (0, config_1.getConfigValue)('provider', 'free') || 'free';
+        const currentProvider: string = getConfigValue('provider', 'free') || 'free';
         const providerLabel = getProviderLabel(currentProvider);
         const targetLanguageLabel = getTargetLanguageLabel();
         const fileName = this.currentFileUri ? this.escapeHtml(this.getFileName(this.currentFileUri)) : '译文';
@@ -835,14 +871,15 @@ class TranslationViewerProvider {
         .toolbar {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 20px 10px;
+            gap: 10px;
+            padding: 14px 20px 12px;
             flex-wrap: nowrap;
+            overflow: visible;
         }
         .toolbar-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             min-width: 0;
             flex-wrap: nowrap;
             flex: 1 1 auto;
@@ -850,95 +887,92 @@ class TranslationViewerProvider {
         .segmented {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 2px;
             padding: 3px;
-            border-radius: 10px;
+            border-radius: 9999px;
             background: var(--vscode-editor-inactiveSelectionBackground, var(--vscode-textBlockQuote-background));
-            border: 1px solid var(--vscode-panel-border);
+            border: 1px solid rgba(127,127,127,0.12);
         }
         .segment-btn {
-            height: 30px;
-            padding: 0 12px;
+            height: 28px;
+            padding: 0 14px;
             border: none;
-            border-radius: 8px;
+            border-radius: 9999px;
             background: transparent;
             color: var(--vscode-descriptionForeground);
             font-size: 12px;
             font-family: inherit;
             cursor: pointer;
             white-space: nowrap;
+            transition: color 0.15s, background 0.15s;
         }
         .segment-btn.active {
             background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
             color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
         }
-        .segment-btn:hover {
+        .segment-btn:hover:not(.active) {
             color: var(--vscode-foreground);
         }
         .provider-wrap {
             position: relative;
-            flex: none;
-            z-index: 2;
         }
         .provider-button {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            height: 36px;
+            gap: 6px;
+            height: 28px;
             padding: 0 12px;
-            border-radius: 10px;
-            border: 1px solid var(--vscode-panel-border);
-            background: var(--vscode-editor-background);
+            border-radius: 9999px;
+            border: 1px solid rgba(127,127,127,0.12);
+            background: transparent;
             color: var(--vscode-foreground);
             cursor: pointer;
             font-family: inherit;
             font-size: 12px;
             white-space: nowrap;
+            transition: background 0.15s;
         }
-        .provider-button:hover,
-        .toolbar-btn:hover {
-            background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-        }
-        .provider-button-prefix {
-            color: var(--vscode-descriptionForeground);
+        .provider-button:hover {
+            background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,0.08));
         }
         .provider-button-arrow {
-            font-size: 10px;
-            color: var(--vscode-descriptionForeground);
+            font-size: 9px;
+            opacity: 0.5;
         }
         .provider-menu {
             display: none;
             position: absolute;
-            top: calc(100% + 4px);
+            top: calc(100% + 6px);
             left: 0;
             background: var(--vscode-menu-background, var(--vscode-dropdown-background));
-            border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
-            border-radius: 6px;
-            padding: 4px 0;
-            min-width: 160px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border: 1px solid rgba(127,127,127,0.15);
+            border-radius: 10px;
+            padding: 4px;
+            min-width: 140px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
             z-index: 200;
         }
         .provider-menu.open { display: block; }
         .provider-menu-item {
             display: block;
             width: 100%;
-            min-width: 160px;
-            padding: 6px 12px;
+            padding: 7px 12px;
             font-size: 12px;
             color: var(--vscode-menu-foreground, var(--vscode-foreground));
             background: none;
             border: none;
+            border-radius: 6px;
             text-align: left;
             cursor: pointer;
             font-family: inherit;
+            transition: background 0.1s;
         }
         .provider-menu-item:hover {
-            background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+            background: var(--vscode-menu-selectionBackground, rgba(127,127,127,0.1));
             color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
         }
         .provider-menu-item.active {
-            opacity: 0.5;
+            opacity: 0.4;
             pointer-events: none;
         }
         .toolbar-file {
@@ -946,7 +980,7 @@ class TranslationViewerProvider {
             flex: 1;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             color: var(--vscode-descriptionForeground);
             font-size: 12px;
             white-space: nowrap;
@@ -958,55 +992,59 @@ class TranslationViewerProvider {
             white-space: nowrap;
             color: var(--vscode-foreground);
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 500;
         }
         .file-arrow {
             flex: none;
-            opacity: 0.6;
+            opacity: 0.4;
         }
         .file-target {
             flex: none;
+            opacity: 0.6;
         }
         .toolbar-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
             flex: none;
         }
         .toolbar-btn {
-            height: 32px;
-            padding: 0 12px;
-            border-radius: 8px;
-            border: 1px solid transparent;
+            height: 28px;
+            padding: 0 10px;
+            border-radius: 6px;
+            border: none;
             background: transparent;
             color: var(--vscode-descriptionForeground);
             cursor: pointer;
             font-family: inherit;
             font-size: 12px;
             white-space: nowrap;
+            transition: color 0.15s, background 0.15s;
         }
         .toolbar-btn:hover {
             color: var(--vscode-foreground);
+            background: rgba(127,127,127,0.08);
         }
         .memo {
-            padding: 8px 20px 10px;
+            padding: 6px 20px 8px;
             font-size: 11px;
             color: var(--vscode-descriptionForeground);
-            opacity: 0.7;
+            opacity: 0.6;
             transition: opacity 0.3s;
-            border-top: 1px solid rgba(127, 127, 127, 0.08);
         }
+        .memo:empty { display: none; }
         .memo.loading, .memo.delta-loading {
             opacity: 1;
         }
         .content {
             flex: 1;
-            padding: 20px 24px 28px;
+            padding: 16px 24px 28px;
             overflow-y: auto;
-            line-height: 1.6;
+            line-height: var(--vscode-editor-line-height, 1.6);
+            font-size: var(--vscode-editor-font-size, 14px);
         }
         .content-shell {
-            width: min(920px, 100%);
+            width: min(880px, 100%);
             margin: 0 auto;
         }
         .view {
@@ -1017,12 +1055,12 @@ class TranslationViewerProvider {
         }
         .view-preview pre {
             background: var(--vscode-textBlockQuote-background);
-            padding: 12px 15px;
-            border-radius: 4px;
+            padding: 14px 16px;
+            border-radius: 8px;
             overflow-x: auto;
-            border: 1px solid var(--vscode-panel-border);
-            margin: 12px 0;
-            line-height: 1.4;
+            border: 1px solid rgba(127,127,127,0.1);
+            margin: 14px 0;
+            line-height: 1.5;
         }
         .view-preview pre code {
             background: none;
@@ -1038,10 +1076,10 @@ class TranslationViewerProvider {
             font-family: 'Courier New', monospace;
         }
         .view-preview blockquote {
-            border-left: 4px solid var(--vscode-textBlockQuote-border);
+            border-left: 3px solid rgba(127,127,127,0.2);
             margin: 16px 0;
             padding-left: 16px;
-            font-style: italic;
+            color: var(--vscode-descriptionForeground);
         }
         .view-preview table {
             border-collapse: collapse;
@@ -1049,13 +1087,13 @@ class TranslationViewerProvider {
             margin: 16px 0;
         }
         .view-preview th, .view-preview td {
-            border: 1px solid var(--vscode-panel-border);
-            padding: 12px;
+            border: 1px solid rgba(127,127,127,0.12);
+            padding: 10px 14px;
             text-align: left;
         }
         .view-preview th {
             background: var(--vscode-textBlockQuote-background);
-            font-weight: bold;
+            font-weight: 600;
         }
         .view-preview h1, .view-preview h2, .view-preview h3, .view-preview h4, .view-preview h5, .view-preview h6 {
             margin-top: 24px;
@@ -1073,40 +1111,41 @@ class TranslationViewerProvider {
         }
         .markdown-source {
             margin: 0;
-            border: 1px solid var(--vscode-panel-border);
-            border-radius: 12px;
+            border: 1px solid rgba(127,127,127,0.1);
+            border-radius: 10px;
             background: var(--vscode-editor-background);
             overflow-x: auto;
             overflow-y: hidden;
         }
         .markdown-editor {
             min-width: 100%;
-            padding: 8px 0;
+            padding: 4px 0;
         }
         .markdown-line {
             display: grid;
             grid-template-columns: var(--md-gutter-width, 44px) minmax(0, 1fr);
             align-items: start;
-            min-height: 24px;
-            font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, monospace);
-            font-size: 13px;
-            line-height: 1.75;
+            min-height: var(--vscode-editor-line-height, 20px);
+            font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
+            font-size: var(--vscode-editor-font-size, 13px);
+            line-height: var(--vscode-editor-line-height, 20px);
+            letter-spacing: var(--vscode-editor-letter-spacing, normal);
         }
         .markdown-line:hover {
-            background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.08));
+            background: var(--vscode-editor-lineHighlightBackground, rgba(127, 127, 127, 0.06));
         }
         .markdown-line-no {
             padding: 0 8px 0 6px;
             text-align: right;
             color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
             user-select: none;
-            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-            border-right: 1px solid rgba(127, 127, 127, 0.14);
+            font-size: var(--vscode-editor-font-size, 13px);
+            line-height: var(--vscode-editor-line-height, 20px);
         }
         .markdown-line-text {
             display: block;
             min-width: 0;
-            padding: 0 20px 0 16px;
+            padding: 0 16px;
             white-space: pre-wrap;
             word-break: break-word;
             color: var(--vscode-editor-foreground);
@@ -1119,10 +1158,10 @@ class TranslationViewerProvider {
         .md-token-fence,
         .md-token-quote,
         .md-token-bullet {
-            color: var(--vscode-symbolIcon-keywordForeground, var(--vscode-textLink-foreground));
+            color: var(--vscode-editorInfo-foreground, var(--vscode-textLink-foreground));
         }
         .md-token-heading-text {
-            color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
+            color: var(--vscode-symbolIcon-classForeground, var(--vscode-foreground));
             font-weight: 600;
         }
         .md-token-code {
@@ -1151,6 +1190,70 @@ class TranslationViewerProvider {
                 display: none;
             }
         }
+        /* ---- 设置抽屉 ---- */
+        .drawer-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(38,37,30,0.3); z-index: 900;
+        }
+        .drawer-overlay.open { display: block; }
+        .drawer {
+            position: fixed; top: 0; right: -360px; width: 340px; height: 100%; z-index: 901;
+            background: var(--vscode-sideBar-background, #f2f1ed);
+            border-left: 1px solid rgba(38,37,30,0.15);
+            box-shadow: -8px 0 32px rgba(38,37,30,0.12);
+            transition: right 0.25s ease; display: flex; flex-direction: column;
+            font-family: var(--vscode-font-family, system-ui);
+        }
+        .drawer.open { right: 0; }
+        .drawer-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 20px; border-bottom: 1px solid rgba(38,37,30,0.1);
+        }
+        .drawer-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--vscode-foreground, #26251e); }
+        .drawer-close {
+            background: none; border: none; font-size: 18px; cursor: pointer;
+            color: var(--vscode-foreground, #26251e); opacity: 0.5; padding: 4px 8px; border-radius: 4px;
+        }
+        .drawer-close:hover { opacity: 1; background: rgba(38,37,30,0.06); }
+        .drawer-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .drawer-label {
+            display: block; font-size: 12px; font-weight: 500; margin: 12px 0 4px;
+            color: var(--vscode-foreground, #26251e); opacity: 0.7;
+        }
+        .drawer-label:first-child { margin-top: 0; }
+        .drawer-select, .drawer-input {
+            width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px;
+            border: 1px solid rgba(38,37,30,0.15); border-radius: 6px;
+            background: var(--vscode-input-background, #fff);
+            color: var(--vscode-input-foreground, #26251e);
+        }
+        .drawer-select:focus, .drawer-input:focus { outline: none; border-color: #cf2d56; }
+        .drawer-fields { margin-top: 4px; }
+        .drawer-actions { display: flex; gap: 8px; margin-top: 20px; }
+        .drawer-btn {
+            flex: 1; padding: 8px 0; font-size: 13px; border-radius: 6px; cursor: pointer;
+            border: 1px solid rgba(38,37,30,0.15); font-weight: 500;
+        }
+        .drawer-btn-primary {
+            background: #26251e; color: #f2f1ed; border-color: #26251e;
+        }
+        .drawer-btn-primary:hover { background: #cf2d56; border-color: #cf2d56; }
+        .drawer-btn-secondary { background: transparent; color: var(--vscode-foreground, #26251e); }
+        .drawer-btn-secondary:hover { background: rgba(38,37,30,0.06); }
+        .drawer-status {
+            margin-top: 12px; font-size: 12px; min-height: 18px;
+            color: var(--vscode-foreground, #26251e); opacity: 0.7;
+        }
+        .drawer-status.success { color: #1f8a65; opacity: 1; }
+        .drawer-status.error { color: #cf2d56; opacity: 1; }
+        .drawer-footer {
+            margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(38,37,30,0.1);
+            display: flex; gap: 16px;
+        }
+        .drawer-link {
+            font-size: 12px; color: var(--vscode-foreground, #26251e); opacity: 0.5;
+            text-decoration: none;
+        }
+        .drawer-link:hover { opacity: 1; color: #cf2d56; }
     </style>
 </head>
 <body>
@@ -1168,9 +1271,8 @@ class TranslationViewerProvider {
                     </button>
                     <div class="provider-menu" id="providerMenu" role="menu">
                         <button type="button" class="provider-menu-item ${currentProvider === 'free' ? 'active' : ''}" data-provider="free" onclick="selectProvider(event,'free')">免费</button>
+                        <button type="button" class="provider-menu-item ${currentProvider === 'volcengine' ? 'active' : ''}" data-provider="volcengine" onclick="selectProvider(event,'volcengine')">火山引擎</button>
                         <button type="button" class="provider-menu-item ${currentProvider === 'google' ? 'active' : ''}" data-provider="google" onclick="selectProvider(event,'google')">Google</button>
-                        <button type="button" class="provider-menu-item ${currentProvider === 'azure' ? 'active' : ''}" data-provider="azure" onclick="selectProvider(event,'azure')">Azure</button>
-                        <button type="button" class="provider-menu-item ${currentProvider === 'custom' ? 'active' : ''}" data-provider="custom" onclick="selectProvider(event,'custom')">自定义 API</button>
                     </div>
                 </div>
                 <div class="toolbar-file" title="${fileName} → ${targetLanguageLabel}">
@@ -1183,10 +1285,51 @@ class TranslationViewerProvider {
                 <button type="button" class="toolbar-btn" onclick="syncTranslation()" title="按缓存同步">同步</button>
                 <button type="button" class="toolbar-btn" onclick="forceRefreshTranslation()" title="忽略缓存重翻">重翻</button>
                 <button type="button" class="toolbar-btn" onclick="saveTranslation()" title="导出译文">导出</button>
-                <button type="button" class="toolbar-btn" onclick="openSettings('markdownTranslator')" title="打开设置">设置</button>
+                <button type="button" class="toolbar-btn" onclick="openDrawer()" title="打开设置">设置</button>
             </div>
         </div>
     </div>
+    <!-- 设置抽屉 -->
+    <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+    <aside class="drawer" id="drawer">
+        <div class="drawer-header">
+            <h3>设置</h3>
+            <button type="button" class="drawer-close" onclick="closeDrawer()">✕</button>
+        </div>
+        <div class="drawer-body">
+            <label class="drawer-label">翻译服务商</label>
+            <select id="drawerProvider" class="drawer-select" onchange="showProviderFields()">
+                <option value="free">免费</option>
+                <option value="volcengine">火山引擎</option>
+                <option value="google">Google</option>
+            </select>
+            <div id="fieldsVolcengine" class="drawer-fields" style="display:none">
+                <label class="drawer-label">AccessKey ID</label>
+                <input id="volcAccessKeyId" class="drawer-input" type="text" placeholder="AK..." />
+                <label class="drawer-label">Secret Key</label>
+                <input id="volcSecretKey" class="drawer-input" type="password" placeholder="SK..." />
+                <label class="drawer-label">Region</label>
+                <input id="volcRegion" class="drawer-input" type="text" value="cn-north-1" />
+            </div>
+            <div id="fieldsGoogle" class="drawer-fields" style="display:none">
+                <label class="drawer-label">API Key</label>
+                <input id="googleApiKey" class="drawer-input" type="password" placeholder="AIza..." />
+            </div>
+            <div id="fieldsFree" class="drawer-fields" style="display:none">
+                <label class="drawer-label">Google 镜像 (可选)</label>
+                <input id="freeGoogleMirror" class="drawer-input" type="text" placeholder="https://..." />
+            </div>
+            <div class="drawer-actions">
+                <button type="button" class="drawer-btn drawer-btn-primary" onclick="saveDrawerSettings()">保存</button>
+                <button type="button" class="drawer-btn drawer-btn-secondary" onclick="testDrawerConnection()">测试连接</button>
+            </div>
+            <div id="drawerStatus" class="drawer-status"></div>
+            <div class="drawer-footer">
+                <a href="https://github.com/hiyeshu/md-translator-zh" class="drawer-link">GitHub</a>
+                <a href="https://github.com/hiyeshu/md-translator-zh/issues" class="drawer-link">反馈</a>
+            </div>
+        </div>
+    </aside>
     <div class="memo" id="memo">
         译自 ${providerLabel}
     </div>
@@ -1261,6 +1404,67 @@ class TranslationViewerProvider {
                 } catch (e) {}
             }
 
+            // ---- 设置抽屉 ----
+            function openDrawer() {
+                vscode.postMessage({ command: 'getSettings' });
+                document.getElementById('drawerOverlay').classList.add('open');
+                document.getElementById('drawer').classList.add('open');
+            }
+            function closeDrawer() {
+                document.getElementById('drawerOverlay').classList.remove('open');
+                document.getElementById('drawer').classList.remove('open');
+            }
+            function showProviderFields() {
+                var p = document.getElementById('drawerProvider').value;
+                document.getElementById('fieldsVolcengine').style.display = p === 'volcengine' ? 'block' : 'none';
+                document.getElementById('fieldsGoogle').style.display = p === 'google' ? 'block' : 'none';
+                document.getElementById('fieldsFree').style.display = p === 'free' ? 'block' : 'none';
+            }
+            function populateSettings(s) {
+                document.getElementById('drawerProvider').value = s.provider || 'free';
+                document.getElementById('volcAccessKeyId').value = s['volcengine.accessKeyId'] || '';
+                document.getElementById('volcSecretKey').value = s['volcengine.secretKey'] || '';
+                document.getElementById('volcRegion').value = s['volcengine.region'] || 'cn-north-1';
+                document.getElementById('googleApiKey').value = s['google.apiKey'] || '';
+                document.getElementById('freeGoogleMirror').value = s['free.googleMirror'] || '';
+                showProviderFields();
+            }
+            function saveDrawerSettings() {
+                var settings = { provider: document.getElementById('drawerProvider').value };
+                var p = settings.provider;
+                if (p === 'volcengine') {
+                    settings['volcengine.accessKeyId'] = document.getElementById('volcAccessKeyId').value;
+                    settings['volcengine.secretKey'] = document.getElementById('volcSecretKey').value;
+                    settings['volcengine.region'] = document.getElementById('volcRegion').value || 'cn-north-1';
+                } else if (p === 'google') {
+                    settings['google.apiKey'] = document.getElementById('googleApiKey').value;
+                } else {
+                    settings['free.googleMirror'] = document.getElementById('freeGoogleMirror').value;
+                }
+                document.getElementById('drawerStatus').textContent = '保存中...';
+                document.getElementById('drawerStatus').className = 'drawer-status';
+                vscode.postMessage({ command: 'saveSettings', settings: settings });
+            }
+            function testDrawerConnection() {
+                document.getElementById('drawerStatus').textContent = '测试中...';
+                document.getElementById('drawerStatus').className = 'drawer-status';
+                vscode.postMessage({ command: 'testConnection' });
+            }
+
+            window.addEventListener('message', function(event) {
+                var msg = event.data;
+                if (msg.command === 'settingsData') { populateSettings(msg.settings); }
+                if (msg.command === 'settingsSaved') {
+                    var el = document.getElementById('drawerStatus');
+                    el.textContent = '已保存'; el.className = 'drawer-status success';
+                }
+                if (msg.command === 'testResult') {
+                    var el = document.getElementById('drawerStatus');
+                    el.textContent = msg.message;
+                    el.className = 'drawer-status ' + (msg.success ? 'success' : 'error');
+                }
+            });
+
             function closeProviderMenu() {
                 var menu = document.getElementById('providerMenu');
                 var toggle = document.getElementById('providerToggle');
@@ -1289,9 +1493,8 @@ class TranslationViewerProvider {
                 currentProvider = provider || currentProvider;
                 var providerLabels = {
                     free: '免费',
+                    volcengine: '火山引擎',
                     google: 'Google',
-                    azure: 'Azure',
-                    custom: '自定义 API'
                 };
                 var providerName = providerLabels[currentProvider] || currentProvider;
                 var providerButtonLabel = document.getElementById('providerButtonLabel');
@@ -1362,6 +1565,11 @@ class TranslationViewerProvider {
             window.syncTranslation = syncTranslation;
             window.forceRefreshTranslation = forceRefreshTranslation;
             window.openSettings = openSettings;
+            window.openDrawer = openDrawer;
+            window.closeDrawer = closeDrawer;
+            window.showProviderFields = showProviderFields;
+            window.saveDrawerSettings = saveDrawerSettings;
+            window.testDrawerConnection = testDrawerConnection;
             window.setViewMode = setViewMode;
             window.toggleProviderMenu = toggleProviderMenu;
             window.selectProvider = selectProvider;
@@ -1371,12 +1579,12 @@ class TranslationViewerProvider {
 </html>`;
         return html;
     }
-    escapeForScript(text) {
+    escapeForScript(text: string) {
         return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     }
-    escapeHtml(text) {
-        return text.replace(/[&<>"']/g, (match) => {
-            const escapeMap = {
+    escapeHtml(text: string) {
+        return text.replace(/[&<>"']/g, (match: string) => {
+            const escapeMap: Record<string, string> = {
                 '&': '&amp;',
                 '<': '&lt;',
                 '>': '&gt;',
@@ -1386,9 +1594,9 @@ class TranslationViewerProvider {
             return escapeMap[match];
         });
     }
-    renderMarkdownSource(markdown) {
+    renderMarkdownSource(markdown: string) {
         const lines = markdown.split('\n');
-        const content = lines.map((line, index) => {
+        const content = lines.map((line: string, index: number) => {
             const lineHtml = this.highlightMarkdownLine(line);
             const isEmpty = line.length === 0 ? ' is-empty' : '';
             return `
@@ -1400,7 +1608,7 @@ class TranslationViewerProvider {
         }).join('');
         return `<div class="markdown-editor">${content}</div>`;
     }
-    highlightMarkdownLine(line) {
+    highlightMarkdownLine(line: string) {
         if (!line) {
             return '';
         }
@@ -1425,7 +1633,7 @@ class TranslationViewerProvider {
         }
         return this.decorateInlineTokens(escaped);
     }
-    decorateInlineTokens(escapedLine) {
+    decorateInlineTokens(escapedLine: string) {
         return escapedLine
             .replace(/(`[^`]+`)/g, '<span class="md-token-code">$1</span>')
             .replace(/(\[[^\]]+\]\([^)]+\))/g, '<span class="md-token-link">$1</span>')
@@ -1433,5 +1641,3 @@ class TranslationViewerProvider {
             .replace(/(\*[^*\n]+\*|_[^_\n]+_)/g, '<span class="md-token-em">$1</span>');
     }
 }
-exports.TranslationViewerProvider = TranslationViewerProvider;
-TranslationViewerProvider.DEBOUNCE_DELAY = 1000;

@@ -1,20 +1,18 @@
-// @ts-nocheck
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateConfigValue = exports.getConfigValue = exports.getLegacyConfig = exports.getConfig = exports.LEGACY_CONFIG_NAMESPACE = exports.CONFIG_NAMESPACE = void 0;
-const vscode = require("vscode");
-exports.CONFIG_NAMESPACE = 'markdownTranslator';
-exports.LEGACY_CONFIG_NAMESPACE = 'mdcarrot';
-function getConfig() {
-    return vscode.workspace.getConfiguration(exports.CONFIG_NAMESPACE);
+import * as vscode from 'vscode';
+
+export const CONFIG_NAMESPACE = 'markdownTranslator';
+export const LEGACY_CONFIG_NAMESPACE = 'mdcarrot';
+
+export function getConfig(): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration(CONFIG_NAMESPACE);
 }
-exports.getConfig = getConfig;
-function getLegacyConfig() {
-    return vscode.workspace.getConfiguration(exports.LEGACY_CONFIG_NAMESPACE);
+
+export function getLegacyConfig(): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration(LEGACY_CONFIG_NAMESPACE);
 }
-exports.getLegacyConfig = getLegacyConfig;
-function getExplicitConfigValue(config, key) {
-    const inspected = config.inspect(key);
+
+function getExplicitConfigValue<T>(config: vscode.WorkspaceConfiguration, key: string): T | undefined {
+    const inspected = config.inspect<T>(key);
     const candidates = [
         inspected?.workspaceFolderLanguageValue,
         inspected?.workspaceFolderValue,
@@ -30,29 +28,25 @@ function getExplicitConfigValue(config, key) {
     }
     return undefined;
 }
-function getConfigValue(key, fallbackValue) {
+
+export function getConfigValue<T>(key: string, fallbackValue: T): T {
     const currentConfig = getConfig();
-    const currentValue = getExplicitConfigValue(currentConfig, key);
-    if (currentValue !== undefined) {
-        return currentValue;
-    }
+    const currentValue = getExplicitConfigValue<T>(currentConfig, key);
+    if (currentValue !== undefined) return currentValue;
+
     const legacyConfig = getLegacyConfig();
-    const legacyValue = getExplicitConfigValue(legacyConfig, key);
-    if (legacyValue !== undefined) {
-        return legacyValue;
-    }
-    const defaultValue = currentConfig.inspect(key)?.defaultValue;
-    if (defaultValue !== undefined) {
-        return defaultValue;
-    }
-    const rawLegacyValue = legacyConfig.get(key);
-    if (rawLegacyValue !== undefined) {
-        return rawLegacyValue;
-    }
+    const legacyValue = getExplicitConfigValue<T>(legacyConfig, key);
+    if (legacyValue !== undefined) return legacyValue;
+
+    const defaultValue = currentConfig.inspect<T>(key)?.defaultValue;
+    if (defaultValue !== undefined) return defaultValue;
+
+    const rawLegacyValue = legacyConfig.get<T>(key);
+    if (rawLegacyValue !== undefined) return rawLegacyValue;
+
     return fallbackValue;
 }
-exports.getConfigValue = getConfigValue;
-async function updateConfigValue(key, value, target = vscode.ConfigurationTarget.Global) {
+
+export async function updateConfigValue(key: string, value: unknown, target = vscode.ConfigurationTarget.Global): Promise<void> {
     await getConfig().update(key, value, target);
 }
-exports.updateConfigValue = updateConfigValue;

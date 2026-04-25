@@ -1,20 +1,19 @@
-// @ts-nocheck
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Logger = void 0;
-const vscode = require("vscode");
-class Logger {
-    static initialize() {
+import * as vscode from 'vscode';
+
+export class Logger {
+    private static outputChannel: vscode.OutputChannel | null = null;
+    private static isDebug = process.env.NODE_ENV === 'development';
+
+    static initialize(): void {
         if (!this.outputChannel) {
             this.outputChannel = vscode.window.createOutputChannel('Markdown 中文翻译器');
         }
     }
-    static log(level, message, ...args) {
+
+    static log(level: string, message: string, ...args: unknown[]): void {
         const timestamp = new Date().toISOString();
         const logMessage = `[${timestamp}] [${level}] ${message}`;
-        // Log to console for development
         console.log(logMessage, ...args);
-        // Log to VS Code output channel
         if (this.outputChannel) {
             this.outputChannel.appendLine(logMessage);
             if (args.length > 0) {
@@ -22,18 +21,20 @@ class Logger {
             }
         }
     }
-    static debug(message, ...args) {
-        if (this.isDebug) {
-            this.log('DEBUG', message, ...args);
-        }
+
+    static debug(message: string, ...args: unknown[]): void {
+        if (this.isDebug) this.log('DEBUG', message, ...args);
     }
-    static info(message, ...args) {
+
+    static info(message: string, ...args: unknown[]): void {
         this.log('INFO', message, ...args);
     }
-    static warn(message, ...args) {
+
+    static warn(message: string, ...args: unknown[]): void {
         this.log('WARN', message, ...args);
     }
-    static error(message, error) {
+
+    static error(message: string, error?: Error): void {
         this.log('ERROR', message);
         if (error && this.outputChannel) {
             this.outputChannel.appendLine(`  Error: ${error.message}`);
@@ -42,12 +43,9 @@ class Logger {
             }
         }
     }
-    static dispose() {
+
+    static dispose(): void {
         this.outputChannel?.dispose();
         this.outputChannel = null;
     }
 }
-exports.Logger = Logger;
-Logger.outputChannel = null;
-Logger.isDebug = process.env.NODE_ENV === 'development';
-

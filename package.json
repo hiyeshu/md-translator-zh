@@ -2,7 +2,7 @@
 	"name": "md-translator-zh",
 	"displayName": "Markdown 中文翻译器",
 	"description": "专业 Markdown 中文翻译工具。支持分栏预览、差异翻译、格式保护和多服务商接入。",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"publisher": "yeshu",
 	"license": "MIT",
 	"repository": {
@@ -34,8 +34,7 @@
 		"i18n",
 		"localization",
 		"google-translate",
-		"azure-translate",
-		"custom-api",
+		"volcengine-translate",
 		"split-pane",
 		"delta-translation"
 	],
@@ -113,15 +112,13 @@
 					"order": 1,
 					"enum": [
 						"free",
-						"google",
-						"azure",
-						"custom"
+						"volcengine",
+						"google"
 					],
 					"enumDescriptions": [
 						"实验性免费：Google 网页端点 + MyMemory",
-						"Google Translate API",
-						"Microsoft Azure Translator",
-						"你自己的翻译接口"
+						"火山引擎机器翻译",
+						"Google Translate API"
 					],
 					"description": "选择翻译服务商"
 				},
@@ -136,28 +133,23 @@
 					"description": "Google Translate API Key（安全存储）",
 					"scope": "machine"
 				},
-				"markdownTranslator.azure.key": {
+				"markdownTranslator.volcengine.accessKeyId": {
 					"type": "string",
 					"order": 4,
-					"description": "Azure Translator Key（安全存储）",
+					"description": "火山引擎 AccessKeyId",
 					"scope": "machine"
 				},
-				"markdownTranslator.azure.region": {
+				"markdownTranslator.volcengine.secretKey": {
 					"type": "string",
-					"default": "eastus",
 					"order": 5,
-					"description": "Azure 区域"
-				},
-				"markdownTranslator.custom.endpoint": {
-					"type": "string",
-					"order": 6,
-					"description": "自定义翻译 API 地址"
-				},
-				"markdownTranslator.custom.token": {
-					"type": "string",
-					"order": 7,
-					"description": "自定义翻译 API Token（可选）",
+					"description": "火山引擎 SecretKey",
 					"scope": "machine"
+				},
+				"markdownTranslator.volcengine.region": {
+					"type": "string",
+					"default": "cn-north-1",
+					"order": 6,
+					"description": "火山引擎区域"
 				}
 			}
 		}
@@ -166,6 +158,7 @@
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./",
 		"package": "npx @vscode/vsce package --out dist/",
+		"prepackage": "npm run compile",
 		"clean": "rm -rf out dist/*.vsix",
 		"release": "npm version patch && npm run package && npx ovsx publish dist/*.vsix -p $OVSX_TOKEN",
 		"release:minor": "npm version minor && npm run package && npx ovsx publish dist/*.vsix -p $OVSX_TOKEN"

@@ -20,6 +20,8 @@ jobs:
 
       - run: npm install
 
+      - run: npm run compile
+
       - run: mkdir -p dist && npx @vscode/vsce package --out dist/ --no-dependencies
 
       - run: npx ovsx publish dist/*.vsix -p ${{ secrets.OVSX_TOKEN }}
