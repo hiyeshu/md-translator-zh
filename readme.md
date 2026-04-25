@@ -37,6 +37,7 @@
 
 `同步` 会尽量复用缓存追平当前文档。  
 `重翻` 会忽略旧结果，整篇重跑。
+`设置` 会打开面板右侧的设置抽屉。
 
 ## 特点
 
@@ -51,26 +52,8 @@
 | 服务商 | 配置 | 说明 |
 |--------|------|------|
 | 免费（默认） | 无需配置 | Google 网页端点 + MyMemory。能直接用，但可能限流 |
-| 火山引擎 | 需要 AccessKeyId + SecretKey | 官方文本翻译接口 |
+| 火山引擎 | 需要 AccessKeyId + SecretKey | 官方机器翻译接口。接入流程看 [API 接入流程概览](https://www.volcengine.com/docs/4640/130872?lang=zh) |
 | Google | 需要 API Key | [Cloud Translation API](https://cloud.google.com/translate) |
-
-切换服务商有两种方式：
-
-- 直接用翻译面板顶部下拉
-- 去设置里改 `markdownTranslator.provider`
-
-## 配置
-
-当前配置键只有这几个：
-
-- `markdownTranslator.provider`
-- `markdownTranslator.free.googleMirror`
-- `markdownTranslator.volcengine.accessKeyId`
-- `markdownTranslator.volcengine.secretKey`
-- `markdownTranslator.volcengine.region`
-- `markdownTranslator.google.apiKey`
-
-工具栏里的 `设置` 现在会打开 VS Code 原生设置页。
 
 ## 命令
 
@@ -86,14 +69,7 @@
 
 ## 隐私
 
-文档内容只发给你选的翻译服务。
-
-- `Google API Key`
-- `火山引擎 AccessKeyId / SecretKey`
-
-都存在本地 VS Code 设置里。
-
-免费模式走 Google 网页端点和 MyMemory。它不是官方稳定接口，所以别把它当强保证服务。
+文档内容只发给你选的翻译服务，密钥存在本地设置里。
 
 ## License
 
