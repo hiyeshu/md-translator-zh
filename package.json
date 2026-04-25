@@ -2,8 +2,8 @@
 	"name": "md-translator-zh",
 	"displayName": "Markdown 中文翻译器",
 	"description": "专业 Markdown 中文翻译工具。支持分栏预览、差异翻译、格式保护和多服务商接入。",
-	"version": "1.0.2",
-	"publisher": "yeshu",
+	"version": "1.0.3",
+	"publisher": "hiyeshu",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
