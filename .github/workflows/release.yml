@@ -20,6 +20,7 @@ jobs:
       - run: mkdir -p dist && npx @vscode/vsce package --out dist/ --no-dependencies
 
       - run: npx ovsx publish dist/*.vsix -p ${{ secrets.OVSX_TOKEN }}
+        continue-on-error: true
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
