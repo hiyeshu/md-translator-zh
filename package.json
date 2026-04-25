@@ -2,7 +2,7 @@
 	"name": "md-translator-zh",
 	"displayName": "Markdown 中文翻译器",
 	"description": "专业 Markdown 中文翻译工具。支持分栏预览、差异翻译、格式保护和多服务商接入。",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"publisher": "hiyeshu",
 	"license": "MIT",
 	"repository": {
@@ -45,64 +45,64 @@
 	"browser": "./out/extension.js",
 	"icon": "assets/icon.png",
 	"contributes": {
-		"commands": [
-			{
-				"command": "mdcarrot.openViewer",
-				"title": "打开 Markdown 中文翻译器",
-				"category": "Markdown 中文翻译器",
-				"icon": "$(globe)"
-			},
-			{
-				"command": "mdcarrot.testConnection",
-				"title": "测试翻译服务连接",
-				"category": "Markdown 中文翻译器"
-			},
-			{
-				"command": "mdcarrot.clearCache",
-				"title": "清除翻译缓存",
-				"category": "Markdown 中文翻译器"
-			},
-			{
-				"command": "mdcarrot.clearProviderCache",
-				"title": "清除当前服务商缓存",
-				"category": "Markdown 中文翻译器"
-			},
-			{
-				"command": "mdcarrot.showCacheStats",
-				"title": "显示缓存统计",
-				"category": "Markdown 中文翻译器"
-			}
-		],
-		"menus": {
-			"explorer/context": [
+			"commands": [
 				{
-					"command": "mdcarrot.openViewer",
-					"when": "resourceExtname == .md",
-					"group": "navigation"
+					"command": "markdownTranslator.openViewer",
+					"title": "打开 Markdown 中文翻译器",
+					"category": "Markdown 中文翻译器",
+					"icon": "$(globe)"
+				},
+				{
+					"command": "markdownTranslator.testConnection",
+					"title": "测试翻译服务连接",
+					"category": "Markdown 中文翻译器"
+				},
+				{
+					"command": "markdownTranslator.clearCache",
+					"title": "清除翻译缓存",
+					"category": "Markdown 中文翻译器"
+				},
+				{
+					"command": "markdownTranslator.clearProviderCache",
+					"title": "清除当前服务商缓存",
+					"category": "Markdown 中文翻译器"
+				},
+				{
+					"command": "markdownTranslator.showCacheStats",
+					"title": "显示缓存统计",
+					"category": "Markdown 中文翻译器"
 				}
 			],
-			"editor/context": [
+			"menus": {
+				"explorer/context": [
+					{
+						"command": "markdownTranslator.openViewer",
+						"when": "resourceExtname == .md",
+						"group": "navigation"
+					}
+				],
+				"editor/context": [
+					{
+						"command": "markdownTranslator.openViewer",
+						"when": "resourceExtname == .md",
+						"group": "navigation"
+					}
+				],
+				"editor/title": [
+					{
+						"command": "markdownTranslator.openViewer",
+						"when": "resourceExtname == .md",
+						"group": "navigation"
+					}
+				]
+			},
+			"keybindings": [
 				{
-					"command": "mdcarrot.openViewer",
-					"when": "resourceExtname == .md",
-					"group": "navigation"
+					"command": "markdownTranslator.openViewer",
+					"key": "ctrl+shift+t",
+					"mac": "cmd+shift+t"
 				}
 			],
-			"editor/title": [
-				{
-					"command": "mdcarrot.openViewer",
-					"when": "resourceExtname == .md",
-					"group": "navigation"
-				}
-			]
-		},
-		"keybindings": [
-			{
-				"command": "mdcarrot.openViewer",
-				"key": "ctrl+shift+t",
-				"mac": "cmd+shift+t"
-			}
-		],
 		"configuration": {
 			"title": "Markdown 中文翻译器",
 			"properties": {

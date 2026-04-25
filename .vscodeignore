@@ -2,3 +2,9 @@ src/**
 tsconfig.json
 .claude/**
 node_modules/**
+Claude.md
+DESIGN.md
+docs/**
+.github/**
+.gitignore
+out/CLAUDE.md

@@ -5,7 +5,7 @@ export class StatusBarManager {
 
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        this.statusBarItem.command = 'mdcarrot.testConnection';
+        this.statusBarItem.command = 'markdownTranslator.testConnection';
     }
 
     showTranslating(progress?: string): void {

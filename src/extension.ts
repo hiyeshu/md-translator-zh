@@ -160,13 +160,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         statusBarManager,
-        vscode.commands.registerCommand('mdcarrot.openViewer', (uri?: vscode.Uri, selectedUris?: readonly vscode.Uri[]) =>
+        vscode.commands.registerCommand('markdownTranslator.openViewer', (uri?: vscode.Uri, selectedUris?: readonly vscode.Uri[]) =>
             openViewer(context, uri, selectedUris)
         ),
-        vscode.commands.registerCommand('mdcarrot.testConnection', () => testConnection(context)),
-        vscode.commands.registerCommand('mdcarrot.clearCache', () => clearAllCache(context)),
-        vscode.commands.registerCommand('mdcarrot.clearProviderCache', () => clearCurrentProviderCache(context)),
-        vscode.commands.registerCommand('mdcarrot.showCacheStats', () => showCacheStats(context))
+        vscode.commands.registerCommand('markdownTranslator.testConnection', () => testConnection(context)),
+        vscode.commands.registerCommand('markdownTranslator.clearCache', () => clearAllCache(context)),
+        vscode.commands.registerCommand('markdownTranslator.clearProviderCache', () => clearCurrentProviderCache(context)),
+        vscode.commands.registerCommand('markdownTranslator.showCacheStats', () => showCacheStats(context))
     );
 }
 
