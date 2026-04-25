@@ -52,23 +52,18 @@
 | 服务商 | 配置 | 说明 |
 |--------|------|------|
 | 免费（默认） | 无需配置 | Google 网页端点 + MyMemory。能直接用，但可能限流 |
-| 火山引擎 | 需要 AccessKeyId + SecretKey | 官方机器翻译接口。接入流程看 [API 接入流程概览](https://www.volcengine.com/docs/4640/130872?lang=zh) |
-| LLM | 需要 API Key | OpenAI 风格兼容接口。默认按智谱 GLM 跑，默认模型是 `glm-4-flash`，接入步骤看 [智谱 LLM 接入教程](https://github.com/hiyeshu/md-translator-zh/blob/main/docs/zhipu-llm-translation.md) |
+| 火山引擎 | AccessKeyId + SecretKey | [接入教程](docs/volcengine-machine-translation.md) |
+| LLM | API Key + Model | [接入教程](docs/zhipu-llm-translation.md)。默认 `glm-4-flash`，支持任何 OpenAI 兼容接口 |
 
 ## 配置键
 
-- `markdownTranslator.provider`
-- `markdownTranslator.free.googleMirror`
+- `markdownTranslator.provider` — `free` / `volcengine` / `llm`
 - `markdownTranslator.volcengine.accessKeyId`
 - `markdownTranslator.volcengine.secretKey`
-- `markdownTranslator.volcengine.region`
 - `markdownTranslator.llm.apiKey`
-- `markdownTranslator.llm.baseUrl`
-- `markdownTranslator.llm.model`
+- `markdownTranslator.llm.model` — 默认 `glm-4-flash`
 
-只想换智谱模型时，直接改 `markdownTranslator.llm.model` 就够了。
-
-当前默认值是 `glm-4-flash`。这是智谱免费、速度也够快的那档。
+`llm.baseUrl` 和 `volcengine.region` 有默认值，通常不用动。
 
 ## 命令
 
