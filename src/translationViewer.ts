@@ -7,6 +7,7 @@ import { MarkdownProcessor, TextNode } from './markdownProcessor';
 import { getConfigValue, updateConfigValue } from './config';
 
 const DEFAULT_TARGET_LANGUAGE = 'zh-CN';
+const VOLCENGINE_TUTORIAL_URL = 'https://github.com/hiyeshu/md-translator-zh/blob/main/docs/volcengine-machine-translation.md';
 function getProviderLabel(provider: string): string {
     const labels: Record<string, string> = {
         free: '免费',
@@ -118,7 +119,7 @@ export class TranslationViewerProvider {
             Logger.error('Auto-translation failed:', error instanceof Error ? error : undefined);
         }
     }
-    async handleWebviewMessage(message: { command: string; provider?: string; content?: string; query?: string; settings?: Record<string, string> }, fileUri: vscode.Uri) {
+    async handleWebviewMessage(message: { command: string; provider?: string; content?: string; query?: string; url?: string; settings?: Record<string, string> }, fileUri: vscode.Uri) {
         try {
             switch (message.command) {
                 case 'save':
@@ -171,6 +172,11 @@ export class TranslationViewerProvider {
                 }
                 case 'openSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', message.query || 'markdownTranslator');
+                    break;
+                case 'openExternal':
+                    if (typeof message.url === 'string' && message.url) {
+                        await vscode.env.openExternal(vscode.Uri.parse(message.url));
+                    }
                     break;
                 default:
                     console.warn('Unknown webview message:', message.command);
@@ -1228,6 +1234,14 @@ export class TranslationViewerProvider {
         }
         .drawer-select:focus, .drawer-input:focus { outline: none; border-color: #cf2d56; }
         .drawer-fields { margin-top: 4px; }
+        .drawer-help { margin-top: 10px; }
+        .drawer-help-link {
+            display: inline-flex; align-items: center; padding: 0;
+            border: none; background: transparent; cursor: pointer;
+            font-size: 12px; color: var(--vscode-textLink-foreground, #cf2d56);
+            text-decoration: none;
+        }
+        .drawer-help-link:hover { opacity: 0.8; }
         .drawer-actions { display: flex; gap: 8px; margin-top: 20px; }
         .drawer-btn {
             flex: 1; padding: 8px 0; font-size: 13px; border-radius: 6px; cursor: pointer;
@@ -1261,8 +1275,8 @@ export class TranslationViewerProvider {
         <div class="toolbar">
             <div class="toolbar-left">
                 <div class="segmented" role="tablist" aria-label="View mode">
-                    <button type="button" class="segment-btn active" id="previewTab" onclick="setViewMode('preview')">Preview</button>
-                    <button type="button" class="segment-btn" id="markdownTab" onclick="setViewMode('markdown')">Markdown</button>
+                    <button type="button" class="segment-btn" id="previewTab" onclick="setViewMode('preview')">Preview</button>
+                    <button type="button" class="segment-btn active" id="markdownTab" onclick="setViewMode('markdown')">Markdown</button>
                 </div>
                 <div class="provider-wrap" id="providerWrap">
                     <button type="button" class="provider-button" id="providerToggle" onclick="toggleProviderMenu(event)" aria-haspopup="menu" aria-expanded="false">
@@ -1310,6 +1324,9 @@ export class TranslationViewerProvider {
                 <input id="volcSecretKey" class="drawer-input" type="password" placeholder="SK..." />
                 <label class="drawer-label">Region</label>
                 <input id="volcRegion" class="drawer-input" type="text" value="cn-north-1" />
+                <div class="drawer-help">
+                    <button type="button" class="drawer-help-link" onclick="openVolcengineTutorial()">查看申请教程</button>
+                </div>
             </div>
             <div id="fieldsGoogle" class="drawer-fields" style="display:none">
                 <label class="drawer-label">API Key</label>
@@ -1356,7 +1373,7 @@ export class TranslationViewerProvider {
             }
             
             var webviewState = vscode.getState() || {};
-            var viewMode = webviewState.viewMode === 'markdown' ? 'markdown' : 'preview';
+            var viewMode = webviewState.viewMode === 'preview' ? 'preview' : 'markdown';
             var currentProvider = ${JSON.stringify(currentProvider)};
             var translatedContent = ${JSON.stringify(cleanMarkdown)};
 
@@ -1449,6 +1466,9 @@ export class TranslationViewerProvider {
                 document.getElementById('drawerStatus').textContent = '测试中...';
                 document.getElementById('drawerStatus').className = 'drawer-status';
                 vscode.postMessage({ command: 'testConnection' });
+            }
+            function openVolcengineTutorial() {
+                vscode.postMessage({ command: 'openExternal', url: ${JSON.stringify(VOLCENGINE_TUTORIAL_URL)} });
             }
 
             window.addEventListener('message', function(event) {
@@ -1570,6 +1590,7 @@ export class TranslationViewerProvider {
             window.showProviderFields = showProviderFields;
             window.saveDrawerSettings = saveDrawerSettings;
             window.testDrawerConnection = testDrawerConnection;
+            window.openVolcengineTutorial = openVolcengineTutorial;
             window.setViewMode = setViewMode;
             window.toggleProviderMenu = toggleProviderMenu;
             window.selectProvider = selectProvider;
