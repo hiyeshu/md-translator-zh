@@ -1439,7 +1439,9 @@ class TranslationViewerProvider {
             </div>
             <div class="drawer-status" id="drawerStatus"></div>
             <div class="drawer-footer">
-                <a href="#" onclick="openVscodeSettings('markdownTranslator'); return false;">在 VS Code 设置中编辑</a>
+                <a href="https://github.com/hiyeshu/md-translator-zh" title="GitHub">GitHub</a>
+                <span style="margin: 0 6px; opacity: 0.3;">·</span>
+                <a href="https://github.com/hiyeshu/md-translator-zh/issues" title="反馈">反馈</a>
             </div>
         </div>
     </aside>

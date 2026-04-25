@@ -1,75 +1,49 @@
-# Markdown 中文翻译器
+<p align="center">
+  <img src="assets/icon.png" width="80" height="80" alt="Markdown 中文翻译器">
+</p>
 
-一个给 Markdown 用的中文翻译插件。现在固定输出简体中文，支持分栏预览、差异翻译、缓存和多服务商接入。
+<h1 align="center">Markdown 中文翻译器</h1>
 
-## 用法
+<p align="center">
+  把英文 Markdown 翻成中文，直接在编辑器里看。<br>
+  开箱即用，改哪翻哪。
+</p>
 
-1. 在 VS Code 里打开 `.md` 文件。
-2. 按 `Ctrl+Shift+T`，Mac 用 `Cmd+Shift+T`。
-3. 选好翻译服务商。
-4. 开始翻译。
+<p align="center">
+  <a href="https://github.com/hiyeshu/md-translator-zh">GitHub</a> ·
+  <a href="https://github.com/hiyeshu/md-translator-zh/issues">反馈</a>
+</p>
 
-## 现在有什么
+---
 
-- 左边原文，右边译文，同步滚动
-- 只翻改动的段落，省 API 费
-- 保留 Markdown 结构，不乱代码块、链接和表格
-- 默认免费，也支持 Google、Azure、自定义 API
+打开任意 `.md` 文件，按 `Cmd+Shift+T`（Windows `Ctrl+Shift+T`），左边原文右边译文。
 
-## 设置
+## 特点
 
-设置页现在用 `markdownTranslator.*`。旧的 `mdcarrot.*` 还兼容，但不再继续展示。
+- **分栏预览** — 原文和译文并排，同步滚动
+- **差异翻译** — 只翻改动的段落，不浪费 API 调用
+- **格式保护** — 代码块、链接、表格原样保留
+- **插件内设置** — 点工具栏「设置」直接配，不用跳 VS Code 设置页
+- **开箱即用** — 默认免费翻译，零配置
 
-默认免费：
+## 服务商
 
-```json
-{
-  "markdownTranslator.provider": "free"
-}
-```
+| 服务商 | 配置 | 说明 |
+|--------|------|------|
+| 免费（默认） | 无需配置 | Google 网页端点 + MyMemory，可能限流 |
+| Google | 需要 API Key | [Cloud Translation API](https://cloud.google.com/translate) |
+| Azure | 需要 Key + Region | [Azure Translator](https://azure.microsoft.com/products/ai-services/ai-translator) |
+| 自定义 API | 需要 Endpoint | 接你自己的翻译服务 |
 
-可选镜像：
+切换服务商：打开翻译面板 → 点「设置」→ 选服务商 → 填 Key → 保存。
 
-```json
-{
-  "markdownTranslator.free.googleMirror": "https://your-google-mirror.example.com"
-}
-```
+## 自定义 API 格式
 
-Google 官方 API:
-
-```json
-{
-  "markdownTranslator.provider": "google",
-  "markdownTranslator.google.apiKey": "YOUR_API_KEY"
-}
-```
-
-Azure:
+你的接口会收到：
 
 ```json
 {
-  "markdownTranslator.provider": "azure",
-  "markdownTranslator.azure.key": "YOUR_KEY",
-  "markdownTranslator.azure.region": "eastus"
-}
-```
-
-自定义 API:
-
-```json
-{
-  "markdownTranslator.provider": "custom",
-  "markdownTranslator.custom.endpoint": "https://your-api.example.com/v1/translate",
-  "markdownTranslator.custom.token": "YOUR_TOKEN"
-}
-```
-
-自定义 API 默认会收到这类请求：
-
-```json
-{
-  "texts": ["Hello"],
+  "texts": ["Hello world"],
   "sourceLang": "auto",
   "targetLang": "zh-CN",
   "format": "text",
@@ -77,20 +51,22 @@ Azure:
 }
 ```
 
+返回 `{ "text": "..." }` 或 `{ "translations": ["..."] }` 都行。
+
 ## 命令
 
 | 命令 | 快捷键 | 说明 |
 |------|--------|------|
-| 打开 Markdown 中文翻译器 | `Ctrl+Shift+T` | 打开分栏翻译界面 |
-| 测试翻译服务连接 | 命令面板 | 检查服务配置 |
-| 清除翻译缓存 | 命令面板 | 清空缓存 |
+| 打开翻译器 | `Cmd/Ctrl+Shift+T` | 分栏翻译界面 |
+| 测试连接 | 命令面板 | 检查当前服务商 |
+| 清除缓存 | 命令面板 | 重新翻译所有内容 |
+
+也可以右键 `.md` 文件或在编辑器标题栏点地球图标打开。
 
 ## 隐私
 
-API Key 存在 VS Code 设置里。文档内容只会发给你选的翻译服务。默认免费会请求 Google 网页端点和 MyMemory，稳定性不保证。
+文档内容只发给你选的翻译服务。API Key 存在本地 VS Code 设置里。免费模式走 Google 网页端点和 MyMemory，不保证稳定性。
 
-## 说明
+## License
 
-- 现在仓库是从已安装扩展反拷出来的，代码是编译产物
-- 图标还是旧图，还没重画
-- 许可证沿用 MIT
+MIT
