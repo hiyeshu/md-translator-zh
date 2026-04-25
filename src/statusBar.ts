@@ -31,4 +31,4 @@ class StatusBarManager {
     }
 }
 exports.StatusBarManager = StatusBarManager;
-//# sourceMappingURL=statusBar.js.map
+

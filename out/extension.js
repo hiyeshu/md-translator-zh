@@ -1,157 +1,166 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
-const vscode = require("vscode");
-const logger_1 = require("./logger");
-let translationViewerProvider = null;
-// Constants for better maintainability
+// @ts-nocheck
+const vscode = __importStar(require("vscode"));
+const logger_2 = require("./logger");
+const statusBar_1 = require("./statusBar");
+const translationManager_2 = require("./translationManager");
+const translationViewer_1 = require("./translationViewer");
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
-const MARKDOWN_GLOB_PATTERN = '**/*.{md,markdown}';
-const EXCLUDE_PATTERN = '**/node_modules/**';
-const MAX_SEARCH_FILES = 10;
-/**
- * Check if a file is a markdown file based on its extension
- */
-function isMarkdownFile(uri) {
-    const filePath = uri.fsPath.toLowerCase();
-    return MARKDOWN_EXTENSIONS.some(ext => filePath.endsWith(ext));
-}
-/**
- * Find the target markdown file using priority-based detection
- */
-// Track the most recently active markdown file
+let translationViewerProvider = null;
+let statusBarManager = null;
+let fallbackTranslationManager = null;
 let lastActiveMarkdownFile = null;
-// Setup tracking for active markdown files
+function getProviderLabel(providerName) {
+    const labels = {
+        free: '免费',
+        google: 'Google',
+        azure: 'Azure',
+        custom: '自定义 API',
+    };
+    return labels[providerName] || providerName;
+}
+function isMarkdownFile(uri) {
+    return !!uri && MARKDOWN_EXTENSIONS.some(ext => uri.fsPath.toLowerCase().endsWith(ext));
+}
+function getTranslationManager(context) {
+    if (translationViewerProvider?.translationManager) {
+        return translationViewerProvider.translationManager;
+    }
+    if (!fallbackTranslationManager) {
+        fallbackTranslationManager = new translationManager_2.TranslationManager(context);
+    }
+    return fallbackTranslationManager;
+}
 function setupMarkdownFileTracking(context) {
-    // Track when active editor changes
-    const onDidChangeActiveTextEditor = vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && isMarkdownFile(editor.document.uri)) {
-            lastActiveMarkdownFile = editor.document.uri;
-            logger_1.Logger.info(`Tracked active markdown: ${editor.document.uri.fsPath}`);
+    const syncLastActive = (uri) => {
+        if (isMarkdownFile(uri)) {
+            lastActiveMarkdownFile = uri;
         }
-    });
-    // Track when documents are opened
-    const onDidOpenTextDocument = vscode.workspace.onDidOpenTextDocument((document) => {
-        if (isMarkdownFile(document.uri)) {
-            lastActiveMarkdownFile = document.uri;
-            logger_1.Logger.info(`Tracked opened markdown: ${document.uri.fsPath}`);
-        }
-    });
-    context.subscriptions.push(onDidChangeActiveTextEditor, onDidOpenTextDocument);
+    };
+    syncLastActive(vscode.window.activeTextEditor?.document.uri);
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => {
+        syncLastActive(editor?.document.uri);
+    }), vscode.workspace.onDidOpenTextDocument(document => {
+        syncLastActive(document.uri);
+    }), vscode.workspace.onDidChangeTextDocument(event => {
+        translationViewerProvider?.onFileChanged(event.document.uri);
+    }));
 }
 async function findTargetMarkdownFile(uri, selectedUris) {
-    logger_1.Logger.info('=== FILE DETECTION DEBUG ===');
-    logger_1.Logger.info(`Context URI: ${uri ? uri.fsPath : 'null'}`);
-    logger_1.Logger.info(`Selected URIs count: ${selectedUris?.length || 0}`);
-    logger_1.Logger.info(`Last active markdown: ${lastActiveMarkdownFile ? lastActiveMarkdownFile.fsPath : 'null'}`);
-    // Priority 1: Context menu URI (right-clicked file)
-    if (uri && isMarkdownFile(uri)) {
-        logger_1.Logger.info(`✅ Using context URI: ${uri.fsPath}`);
+    if (isMarkdownFile(uri)) {
         return uri;
     }
-    // Priority 2: Selected URIs from Explorer (from context menu)
-    if (selectedUris?.length) {
-        const markdownUri = selectedUris.find(isMarkdownFile);
-        if (markdownUri) {
-            logger_1.Logger.info(`✅ Using selected file from Explorer: ${markdownUri.fsPath}`);
-            return markdownUri;
-        }
+    const selectedMarkdown = selectedUris?.find(isMarkdownFile);
+    if (selectedMarkdown) {
+        return selectedMarkdown;
     }
-    // Priority 3: Last active markdown file (tracks clicks/opens)
-    if (lastActiveMarkdownFile) {
+    if (isMarkdownFile(lastActiveMarkdownFile)) {
         try {
             await vscode.workspace.fs.stat(lastActiveMarkdownFile);
-            logger_1.Logger.info(`✅ Using last active markdown: ${lastActiveMarkdownFile.fsPath}`);
-            vscode.window.showInformationMessage(`Using recent file: ${vscode.workspace.asRelativePath(lastActiveMarkdownFile)}`);
             return lastActiveMarkdownFile;
         }
         catch {
-            logger_1.Logger.info('❌ Last active markdown no longer exists');
             lastActiveMarkdownFile = null;
         }
     }
-    // Priority 4: Current active editor
-    const activeEditor = vscode.window.activeTextEditor;
-    if (activeEditor && isMarkdownFile(activeEditor.document.uri)) {
-        logger_1.Logger.info(`✅ Using current active editor: ${activeEditor.document.uri.fsPath}`);
-        return activeEditor.document.uri;
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (isMarkdownFile(activeUri)) {
+        return activeUri;
     }
-    logger_1.Logger.info('❌ No markdown files found');
     return null;
 }
+async function openViewer(context, uri, selectedUris) {
+    const targetUri = await findTargetMarkdownFile(uri, selectedUris);
+    if (!targetUri) {
+        vscode.window.showWarningMessage('先打开一个 Markdown 文件。');
+        return;
+    }
+    if (!translationViewerProvider) {
+        translationViewerProvider = new translationViewer_1.TranslationViewerProvider(context.extensionUri, context);
+    }
+    await translationViewerProvider.createOrShow(targetUri);
+}
+async function testConnection(context) {
+    const manager = getTranslationManager(context);
+    const providerName = manager.getCurrentProvider();
+    const provider = manager.getCurrentProviderInstance();
+    const providerLabel = getProviderLabel(providerName);
+    statusBarManager?.showTranslating();
+    try {
+        if (providerName === 'custom' || providerName === 'free') {
+            await provider.translate('Connection test');
+            const message = providerName === 'free'
+                ? '免费可用。稳定性不保证。'
+                : '自定义 API 连接正常。';
+            vscode.window.showInformationMessage(message);
+            statusBarManager?.showReady();
+            return;
+        }
+        const quota = await provider.getQuota();
+        if (quota?.error && !/不会在这里直接返回剩余额度|没有统一额度接口/.test(quota.error)) {
+            throw new Error(quota.error);
+        }
+        const detail = quota?.resetDate ? ` ${quota.resetDate}` : '';
+        vscode.window.showInformationMessage(`${providerLabel} 连接正常。${detail}`.trim());
+        statusBarManager?.showReady();
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : '连接失败';
+        statusBarManager?.showError(message);
+        vscode.window.showErrorMessage(`测试连接失败：${message}`);
+    }
+}
+function clearAllCache(context) {
+    getTranslationManager(context).clearAllCache();
+}
+function clearCurrentProviderCache(context) {
+    getTranslationManager(context).clearProviderCache();
+}
+function showCacheStats(context) {
+    const stats = getTranslationManager(context).getCacheStats();
+    const providers = stats.providers.length > 0 ? stats.providers.join(', ') : '无';
+    vscode.window.showInformationMessage(`文本缓存 ${stats.textEntries} 条，文件缓存 ${stats.fileEntries} 条，服务商：${providers}`);
+}
 function activate(context) {
-    // Initialize logger with output channel
-    logger_1.Logger.initialize();
-    logger_1.Logger.info('🚀 Markdown 中文翻译器: Starting activation...');
-    // Show immediate activation confirmation
-    vscode.window.showInformationMessage('Markdown 中文翻译器已激活');
-    // Setup markdown file tracking (proper VS Code pattern)
+    logger_2.Logger.initialize();
+    statusBarManager = new statusBar_1.StatusBarManager();
+    statusBarManager.showReady();
     setupMarkdownFileTracking(context);
-    const openViewer = vscode.commands.registerCommand('mdcarrot.openViewer', async (uri, selectedUris) => {
-        try {
-            logger_1.Logger.info('🔍 Command triggered - mdcarrot.openViewer');
-            logger_1.Logger.info(`📁 URI parameter: ${uri ? uri.fsPath : 'undefined'}`);
-            logger_1.Logger.info(`📂 Selected URIs: ${selectedUris?.length || 0} files`);
-            // Show command execution confirmation
-            vscode.window.showInformationMessage('Markdown 中文翻译器已打开');
-            // Strict validation: Only work with markdown files
-            if (uri && !isMarkdownFile(uri)) {
-                logger_1.Logger.info(`❌ Ignoring non-markdown file: ${uri.fsPath}`);
-                vscode.window.showWarningMessage('Markdown 中文翻译器只支持 .md 和 .markdown 文件');
-                return;
-            }
-            // Find target markdown file
-            logger_1.Logger.info('🔎 Finding target markdown file...');
-            const targetUri = await findTargetMarkdownFile(uri, selectedUris);
-            if (!targetUri) {
-                logger_1.Logger.info('❌ No target markdown file found');
-                vscode.window.showWarningMessage('Please select a markdown file (.md or .markdown) in the Explorer panel, then try again.');
-                return;
-            }
-            logger_1.Logger.info(`✅ Target file found: ${targetUri.fsPath}`);
-            // Validate file type (double-check)
-            if (!isMarkdownFile(targetUri)) {
-                logger_1.Logger.error(`❌ File validation failed: ${targetUri.fsPath}`);
-                vscode.window.showErrorMessage('Selected file is not a markdown file. Please select a .md or .markdown file.');
-                return;
-            }
-            // Show before loading provider
-            vscode.window.showInformationMessage('Loading translation provider...');
-            // Lazy load and create viewer
-            logger_1.Logger.info('📦 Loading TranslationViewerProvider...');
-            if (!translationViewerProvider) {
-                try {
-                    const { TranslationViewerProvider } = await Promise.resolve().then(() => require('./translationViewer'));
-                    logger_1.Logger.info('✅ TranslationViewerProvider imported successfully');
-                    translationViewerProvider = new TranslationViewerProvider(context.extensionUri, context);
-                    logger_1.Logger.info('✅ TranslationViewerProvider instantiated');
-                }
-                catch (importError) {
-                    logger_1.Logger.error('❌ Failed to import TranslationViewerProvider', importError);
-                    vscode.window.showErrorMessage(`Failed to load provider: ${importError}`);
-                    throw importError;
-                }
-            }
-            logger_1.Logger.info('🎬 Creating or showing viewer...');
-            vscode.window.showInformationMessage('Creating webview...');
-            await translationViewerProvider.createOrShow(targetUri);
-            logger_1.Logger.info('✅ Viewer created/shown successfully');
-        }
-        catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            logger_1.Logger.error('💥 Failed to open translation viewer', error);
-            vscode.window.showErrorMessage(`打开 Markdown 中文翻译器失败：${errorMessage}`);
-        }
-    });
-    context.subscriptions.push(openViewer);
-    logger_1.Logger.info('✅ Markdown 中文翻译器: Activation complete - command registered');
+    context.subscriptions.push(statusBarManager, vscode.commands.registerCommand('mdcarrot.openViewer', (uri, selectedUris) => openViewer(context, uri, selectedUris)), vscode.commands.registerCommand('mdcarrot.testConnection', () => testConnection(context)), vscode.commands.registerCommand('mdcarrot.clearCache', () => clearAllCache(context)), vscode.commands.registerCommand('mdcarrot.clearProviderCache', () => clearCurrentProviderCache(context)), vscode.commands.registerCommand('mdcarrot.showCacheStats', () => showCacheStats(context)));
 }
 exports.activate = activate;
 function deactivate() {
-    logger_1.Logger.info('Markdown 中文翻译器: Extension deactivated');
     translationViewerProvider?.dispose();
     translationViewerProvider = null;
-    logger_1.Logger.dispose();
+    fallbackTranslationManager = null;
+    statusBarManager?.dispose();
+    statusBarManager = null;
+    logger_2.Logger.dispose();
 }
 exports.deactivate = deactivate;
 //# sourceMappingURL=extension.js.map

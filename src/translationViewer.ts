@@ -127,50 +127,6 @@ class TranslationViewerProvider {
                 case 'openSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', message.query || 'markdownTranslator');
                     break;
-                case 'getSettings': {
-                    const settings = {
-                        provider: (0, config_1.getConfigValue)('provider', 'free'),
-                        googleApiKey: (0, config_1.getConfigValue)('google.apiKey', ''),
-                        azureKey: (0, config_1.getConfigValue)('azure.key', ''),
-                        azureRegion: (0, config_1.getConfigValue)('azure.region', 'eastus'),
-                        customEndpoint: (0, config_1.getConfigValue)('custom.endpoint', ''),
-                        customToken: (0, config_1.getConfigValue)('custom.token', '')
-                    };
-                    if (this.panel) {
-                        this.panel.webview.postMessage({ command: 'settingsData', settings });
-                    }
-                    break;
-                }
-                case 'saveSettings': {
-                    const s = message.settings;
-                    if (s) {
-                        await (0, config_1.updateConfigValue)('provider', s.provider);
-                        if (s.googleApiKey) await (0, config_1.updateConfigValue)('google.apiKey', s.googleApiKey);
-                        if (s.azureKey) await (0, config_1.updateConfigValue)('azure.key', s.azureKey);
-                        await (0, config_1.updateConfigValue)('azure.region', s.azureRegion || 'eastus');
-                        if (s.customEndpoint) await (0, config_1.updateConfigValue)('custom.endpoint', s.customEndpoint);
-                        if (s.customToken !== undefined) await (0, config_1.updateConfigValue)('custom.token', s.customToken);
-                        if (this.panel) {
-                            this.panel.webview.postMessage({ command: 'settingsStatus', text: '已保存' });
-                            this.panel.webview.postMessage({ command: 'updateMemo', provider: s.provider, state: 'provider-changed' });
-                        }
-                    }
-                    break;
-                }
-                case 'testConnection': {
-                    try {
-                        await this.translationManager.translate('hello');
-                        if (this.panel) {
-                            this.panel.webview.postMessage({ command: 'settingsStatus', text: '连接成功 ✓' });
-                        }
-                    } catch (e) {
-                        const msg = e instanceof Error ? e.message : 'Unknown error';
-                        if (this.panel) {
-                            this.panel.webview.postMessage({ command: 'settingsStatus', text: '连接失败: ' + msg });
-                        }
-                    }
-                    break;
-                }
                 default:
                     console.warn('Unknown webview message:', message.command);
             }
@@ -731,21 +687,18 @@ class TranslationViewerProvider {
                 <p class="hint">在 VS Code 设置里填入你的 API 地址就行。</p>
                 <button class="action" onclick="openSettings('markdownTranslator.custom.endpoint')">填写 API 地址</button>
             `;
-        }
-        else if (isKeyMissing) {
+        } else if (isKeyMissing) {
             guideHtml = `
                 <p class="hint">在 VS Code 设置里填入 API Key 就能用了。</p>
                 <button class="action" onclick="openSettings('markdownTranslator')">去填 Key</button>
             `;
-        }
-        else if (isKeyInvalid) {
+        } else if (isKeyInvalid) {
             guideHtml = `
                 <p class="hint">Key 可能过期或额度用完了，检查一下？</p>
                 <button class="action" onclick="openSettings('markdownTranslator')">检查设置</button>
                 <button class="action secondary" onclick="retry()">重试</button>
             `;
-        }
-        else {
+        } else {
             guideHtml = `
                 <button class="action" onclick="retry()">重试</button>
                 <button class="action secondary" onclick="openSettings('markdownTranslator')">检查设置</button>
@@ -885,10 +838,7 @@ class TranslationViewerProvider {
             gap: 12px;
             padding: 12px 20px 10px;
             flex-wrap: nowrap;
-            overflow: visible;
-            scrollbar-width: none;
         }
-        .toolbar::-webkit-scrollbar { display: none; }
         .toolbar-left {
             display: flex;
             align-items: center;
@@ -927,6 +877,8 @@ class TranslationViewerProvider {
         }
         .provider-wrap {
             position: relative;
+            flex: none;
+            z-index: 2;
         }
         .provider-button {
             display: inline-flex;
@@ -963,7 +915,7 @@ class TranslationViewerProvider {
             border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
             border-radius: 6px;
             padding: 4px 0;
-            min-width: 120px;
+            min-width: 160px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 200;
         }
@@ -1199,112 +1151,6 @@ class TranslationViewerProvider {
                 display: none;
             }
         }
-        .drawer-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.3);
-            z-index: 300;
-        }
-        .drawer-overlay.open { display: block; }
-        .drawer {
-            position: fixed;
-            top: 0;
-            right: -360px;
-            bottom: 0;
-            width: 340px;
-            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-            border-left: 1px solid var(--vscode-panel-border);
-            z-index: 301;
-            display: flex;
-            flex-direction: column;
-            transition: right 0.2s ease;
-            font-size: 13px;
-        }
-        .drawer.open { right: 0; }
-        .drawer-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--vscode-panel-border);
-        }
-        .drawer-title { font-weight: 600; }
-        .drawer-close {
-            background: none;
-            border: none;
-            color: var(--vscode-descriptionForeground);
-            cursor: pointer;
-            font-size: 16px;
-            padding: 4px;
-        }
-        .drawer-close:hover { color: var(--vscode-foreground); }
-        .drawer-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px;
-        }
-        .field { margin-bottom: 14px; }
-        .field-label {
-            display: block;
-            font-size: 11px;
-            color: var(--vscode-descriptionForeground);
-            margin-bottom: 4px;
-        }
-        .field-input {
-            width: 100%;
-            padding: 6px 10px;
-            border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-            border-radius: 4px;
-            background: var(--vscode-input-background);
-            color: var(--vscode-input-foreground);
-            font-family: inherit;
-            font-size: 13px;
-            box-sizing: border-box;
-        }
-        .field-input:focus {
-            outline: 1px solid var(--vscode-focusBorder);
-        }
-        .field-group { display: none; }
-        .field-group.visible { display: block; }
-        .drawer-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 20px;
-        }
-        .drawer-actions .action {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: none;
-            padding: 8px 20px;
-            border-radius: 4px;
-            font-size: 13px;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .drawer-actions .action:hover { opacity: 0.9; }
-        .drawer-actions .action.secondary {
-            background: var(--vscode-button-secondaryBackground, transparent);
-            color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-foreground));
-            border: 1px solid var(--vscode-panel-border);
-        }
-        .drawer-status {
-            margin-top: 12px;
-            font-size: 12px;
-            color: var(--vscode-descriptionForeground);
-            min-height: 20px;
-        }
-        .drawer-footer {
-            margin-top: 20px;
-            padding-top: 12px;
-            border-top: 1px solid var(--vscode-panel-border);
-            font-size: 11px;
-        }
-        .drawer-footer a {
-            color: var(--vscode-textLink-foreground);
-            text-decoration: none;
-        }
-        .drawer-footer a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -1337,12 +1183,12 @@ class TranslationViewerProvider {
                 <button type="button" class="toolbar-btn" onclick="syncTranslation()" title="按缓存同步">同步</button>
                 <button type="button" class="toolbar-btn" onclick="forceRefreshTranslation()" title="忽略缓存重翻">重翻</button>
                 <button type="button" class="toolbar-btn" onclick="saveTranslation()" title="导出译文">导出</button>
-                <button type="button" class="toolbar-btn" onclick="openDrawer()" title="打开设置">设置</button>
+                <button type="button" class="toolbar-btn" onclick="openSettings('markdownTranslator')" title="打开设置">设置</button>
             </div>
         </div>
     </div>
     <div class="memo" id="memo">
-        译自 ${currentProvider === 'free' ? '' : providerLabel}
+        译自 ${providerLabel}
     </div>
         <div class="content">
             <div class="content-shell">
@@ -1354,58 +1200,6 @@ class TranslationViewerProvider {
                 </section>
             </div>
         </div>
-    <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
-    <aside class="drawer" id="settingsDrawer">
-        <div class="drawer-header">
-            <span class="drawer-title">设置</span>
-            <button type="button" class="drawer-close" onclick="closeDrawer()">✕</button>
-        </div>
-        <div class="drawer-body">
-            <div class="field">
-                <label class="field-label">服务商</label>
-                <select class="field-input" id="settingsProvider" onchange="showProviderFields()">
-                    <option value="free">免费</option>
-                    <option value="google">Google</option>
-                    <option value="azure">Azure</option>
-                    <option value="custom">自定义 API</option>
-                </select>
-            </div>
-            <div class="field-group" id="googleFields">
-                <div class="field">
-                    <label class="field-label">Google API Key</label>
-                    <input type="password" class="field-input" id="googleApiKey" placeholder="填入 API Key">
-                </div>
-            </div>
-            <div class="field-group" id="azureFields">
-                <div class="field">
-                    <label class="field-label">Azure Key</label>
-                    <input type="password" class="field-input" id="azureKey" placeholder="填入 Key">
-                </div>
-                <div class="field">
-                    <label class="field-label">Azure Region</label>
-                    <input type="text" class="field-input" id="azureRegion" placeholder="eastus">
-                </div>
-            </div>
-            <div class="field-group" id="customFields">
-                <div class="field">
-                    <label class="field-label">API 地址</label>
-                    <input type="url" class="field-input" id="customEndpoint" placeholder="https://...">
-                </div>
-                <div class="field">
-                    <label class="field-label">Token（可选）</label>
-                    <input type="password" class="field-input" id="customToken" placeholder="Bearer token">
-                </div>
-            </div>
-            <div class="drawer-actions">
-                <button type="button" class="action" onclick="saveSettings()">保存</button>
-                <button type="button" class="action secondary" onclick="testConnection()">测试连接</button>
-            </div>
-            <div class="drawer-status" id="drawerStatus"></div>
-            <div class="drawer-footer">
-                <a href="#" onclick="openVscodeSettings('markdownTranslator'); return false;">在 VS Code 设置中编辑</a>
-            </div>
-        </div>
-    </aside>
     <script>
         (function() {
             'use strict';
@@ -1465,78 +1259,6 @@ class TranslationViewerProvider {
                 try {
                     vscode.postMessage({ command: 'openSettings', query: query });
                 } catch (e) {}
-            }
-
-            function openVscodeSettings(query) {
-                openSettings(query);
-            }
-
-            function openDrawer() {
-                var drawer = document.getElementById('settingsDrawer');
-                var overlay = document.getElementById('drawerOverlay');
-                if (drawer) drawer.classList.add('open');
-                if (overlay) overlay.classList.add('open');
-                vscode.postMessage({ command: 'getSettings' });
-            }
-
-            function closeDrawer() {
-                var drawer = document.getElementById('settingsDrawer');
-                var overlay = document.getElementById('drawerOverlay');
-                if (drawer) drawer.classList.remove('open');
-                if (overlay) overlay.classList.remove('open');
-            }
-
-            function showProviderFields() {
-                var sel = document.getElementById('settingsProvider');
-                if (!sel) return;
-                var provider = sel.value;
-                ['googleFields','azureFields','customFields'].forEach(function(id) {
-                    var el = document.getElementById(id);
-                    if (el) el.classList.remove('visible');
-                });
-                var map = { google: 'googleFields', azure: 'azureFields', custom: 'customFields' };
-                if (map[provider]) {
-                    var el = document.getElementById(map[provider]);
-                    if (el) el.classList.add('visible');
-                }
-            }
-
-            function populateSettings(settings) {
-                var sel = document.getElementById('settingsProvider');
-                if (sel) sel.value = settings.provider || 'free';
-                var fields = {
-                    googleApiKey: settings.googleApiKey || '',
-                    azureKey: settings.azureKey || '',
-                    azureRegion: settings.azureRegion || 'eastus',
-                    customEndpoint: settings.customEndpoint || '',
-                    customToken: settings.customToken || ''
-                };
-                Object.keys(fields).forEach(function(id) {
-                    var el = document.getElementById(id);
-                    if (el) el.value = fields[id];
-                });
-                showProviderFields();
-            }
-
-            function saveSettings() {
-                var settings = {
-                    provider: document.getElementById('settingsProvider').value,
-                    googleApiKey: document.getElementById('googleApiKey').value,
-                    azureKey: document.getElementById('azureKey').value,
-                    azureRegion: document.getElementById('azureRegion').value,
-                    customEndpoint: document.getElementById('customEndpoint').value,
-                    customToken: document.getElementById('customToken').value
-                };
-                vscode.postMessage({ command: 'saveSettings', settings: settings });
-            }
-
-            function testConnection() {
-                var status = document.getElementById('drawerStatus');
-                if (status) status.textContent = '测试中...';
-                saveSettings();
-                setTimeout(function() {
-                    vscode.postMessage({ command: 'testConnection' });
-                }, 300);
             }
 
             function closeProviderMenu() {
@@ -1602,11 +1324,6 @@ class TranslationViewerProvider {
                         syncTranslation();
                     } else if (message.command === 'updateMemo') {
                         updateMemo(message.provider, message.state, message.savings, message.progress);
-                    } else if (message.command === 'settingsData') {
-                        populateSettings(message.settings);
-                    } else if (message.command === 'settingsStatus') {
-                        var status = document.getElementById('drawerStatus');
-                        if (status) status.textContent = message.text || '';
                     }
                 } catch (e) {}
             });
@@ -1629,11 +1346,11 @@ class TranslationViewerProvider {
                     } else if (state === 'provider-changed') {
                         memo.textContent = '已切到 ' + providerName + '，译文待同步';
                     } else if (state === 'completed') {
-                        memo.textContent = currentProvider === 'free' ? '' : '译自 ' + providerName;
+                        memo.textContent = '译自 ' + providerName;
                     } else if (state === 'incremental') {
                         memo.textContent = '已同步改动';
                     } else {
-                        memo.textContent = currentProvider === 'free' ? '' : '译自 ' + providerName;
+                        memo.textContent = '译自 ' + providerName;
                     }
                 } catch (e) {}
             }
@@ -1645,15 +1362,9 @@ class TranslationViewerProvider {
             window.syncTranslation = syncTranslation;
             window.forceRefreshTranslation = forceRefreshTranslation;
             window.openSettings = openSettings;
-            window.openVscodeSettings = openVscodeSettings;
             window.setViewMode = setViewMode;
             window.toggleProviderMenu = toggleProviderMenu;
             window.selectProvider = selectProvider;
-            window.openDrawer = openDrawer;
-            window.closeDrawer = closeDrawer;
-            window.showProviderFields = showProviderFields;
-            window.saveSettings = saveSettings;
-            window.testConnection = testConnection;
         })();
     </script>
 </body>
@@ -1724,4 +1435,3 @@ class TranslationViewerProvider {
 }
 exports.TranslationViewerProvider = TranslationViewerProvider;
 TranslationViewerProvider.DEBOUNCE_DELAY = 1000;
-//# sourceMappingURL=translationViewer.js.map

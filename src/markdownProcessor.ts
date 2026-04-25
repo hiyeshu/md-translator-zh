@@ -488,4 +488,3 @@ class MarkdownProcessor {
     }
 }
 exports.MarkdownProcessor = MarkdownProcessor;
-//# sourceMappingURL=markdownProcessor.js.map

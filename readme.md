@@ -14,18 +14,34 @@
 - 左边原文，右边译文，同步滚动
 - 只翻改动的段落，省 API 费
 - 保留 Markdown 结构，不乱代码块、链接和表格
-- 支持 Google、Azure、自定义 API
+- 默认免费，也支持 Google、Azure、自定义 API
 
 ## 设置
 
-插件对外名字已经改了，但内部设置键暂时还保留 `mdcarrot.*`，这样旧配置还能接着用。
+设置页现在用 `markdownTranslator.*`。旧的 `mdcarrot.*` 还兼容，但不再继续展示。
 
-Google:
+默认免费：
 
 ```json
 {
-  "mdcarrot.provider": "google",
-  "mdcarrot.google.apiKey": "YOUR_API_KEY"
+  "markdownTranslator.provider": "free"
+}
+```
+
+可选镜像：
+
+```json
+{
+  "markdownTranslator.free.googleMirror": "https://your-google-mirror.example.com"
+}
+```
+
+Google 官方 API:
+
+```json
+{
+  "markdownTranslator.provider": "google",
+  "markdownTranslator.google.apiKey": "YOUR_API_KEY"
 }
 ```
 
@@ -33,9 +49,9 @@ Azure:
 
 ```json
 {
-  "mdcarrot.provider": "azure",
-  "mdcarrot.azure.key": "YOUR_KEY",
-  "mdcarrot.azure.region": "eastus"
+  "markdownTranslator.provider": "azure",
+  "markdownTranslator.azure.key": "YOUR_KEY",
+  "markdownTranslator.azure.region": "eastus"
 }
 ```
 
@@ -43,9 +59,9 @@ Azure:
 
 ```json
 {
-  "mdcarrot.provider": "custom",
-  "mdcarrot.custom.endpoint": "https://your-api.example.com/v1/translate",
-  "mdcarrot.custom.token": "YOUR_TOKEN"
+  "markdownTranslator.provider": "custom",
+  "markdownTranslator.custom.endpoint": "https://your-api.example.com/v1/translate",
+  "markdownTranslator.custom.token": "YOUR_TOKEN"
 }
 ```
 
@@ -71,7 +87,7 @@ Azure:
 
 ## 隐私
 
-API Key 存在 VS Code 设置里。文档内容只会发给你选的翻译服务。
+API Key 存在 VS Code 设置里。文档内容只会发给你选的翻译服务。默认免费会请求 Google 网页端点和 MyMemory，稳定性不保证。
 
 ## 说明
 

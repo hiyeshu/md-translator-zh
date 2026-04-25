@@ -50,4 +50,4 @@ class Logger {
 exports.Logger = Logger;
 Logger.outputChannel = null;
 Logger.isDebug = process.env.NODE_ENV === 'development';
-//# sourceMappingURL=logger.js.map
+

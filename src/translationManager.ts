@@ -356,4 +356,3 @@ class TranslationManager {
     }
 }
 exports.TranslationManager = TranslationManager;
-//# sourceMappingURL=translationManager.js.map
