@@ -33,7 +33,9 @@
 		"documentation",
 		"i18n",
 		"localization",
-		"google-translate",
+		"llm",
+		"zhipu",
+		"glm",
 		"volcengine-translate",
 		"split-pane",
 		"delta-translation"
@@ -113,12 +115,12 @@
 					"enum": [
 						"free",
 						"volcengine",
-						"google"
+						"llm"
 					],
 					"enumDescriptions": [
 						"实验性免费：Google 网页端点 + MyMemory",
 						"火山引擎机器翻译",
-						"Google Translate API"
+						"通用 OpenAI 风格 LLM，默认接智谱 GLM"
 					],
 					"description": "选择翻译服务商"
 				},
@@ -127,28 +129,40 @@
 					"order": 2,
 					"description": "免费 Google 镜像地址（可选）"
 				},
-				"markdownTranslator.google.apiKey": {
+				"markdownTranslator.llm.apiKey": {
 					"type": "string",
 					"order": 3,
-					"description": "Google Translate API Key（安全存储）",
+					"description": "LLM API Key（安全存储）",
 					"scope": "machine"
+				},
+				"markdownTranslator.llm.baseUrl": {
+					"type": "string",
+					"default": "https://open.bigmodel.cn/api/paas/v4/",
+					"order": 4,
+					"description": "LLM Base URL"
+				},
+				"markdownTranslator.llm.model": {
+					"type": "string",
+					"default": "glm-4-flash",
+					"order": 5,
+					"description": "LLM Model"
 				},
 				"markdownTranslator.volcengine.accessKeyId": {
 					"type": "string",
-					"order": 4,
+					"order": 6,
 					"description": "火山引擎 AccessKeyId",
 					"scope": "machine"
 				},
 				"markdownTranslator.volcengine.secretKey": {
 					"type": "string",
-					"order": 5,
+					"order": 7,
 					"description": "火山引擎 SecretKey",
 					"scope": "machine"
 				},
 				"markdownTranslator.volcengine.region": {
 					"type": "string",
 					"default": "cn-north-1",
-					"order": 6,
+					"order": 8,
 					"description": "火山引擎区域"
 				}
 			}

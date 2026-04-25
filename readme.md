@@ -32,7 +32,7 @@
 
 - `Preview`：看渲染后的译文
 - `Markdown`：看翻译后的 Markdown 源文
-- 服务商下拉：`免费 / 火山引擎 / Google`
+- 服务商下拉：`免费 / 火山引擎 / LLM`
 - 工具栏：`同步 / 重翻 / 导出 / 设置`
 
 `同步` 会尽量复用缓存追平当前文档。  
@@ -53,7 +53,22 @@
 |--------|------|------|
 | 免费（默认） | 无需配置 | Google 网页端点 + MyMemory。能直接用，但可能限流 |
 | 火山引擎 | 需要 AccessKeyId + SecretKey | 官方机器翻译接口。接入流程看 [API 接入流程概览](https://www.volcengine.com/docs/4640/130872?lang=zh) |
-| Google | 需要 API Key | [Cloud Translation API](https://cloud.google.com/translate) |
+| LLM | 需要 API Key | OpenAI 风格兼容接口。默认按智谱 GLM 跑，默认模型是 `glm-4-flash`，接入步骤看 [智谱 LLM 接入教程](https://github.com/hiyeshu/md-translator-zh/blob/main/docs/zhipu-llm-translation.md) |
+
+## 配置键
+
+- `markdownTranslator.provider`
+- `markdownTranslator.free.googleMirror`
+- `markdownTranslator.volcengine.accessKeyId`
+- `markdownTranslator.volcengine.secretKey`
+- `markdownTranslator.volcengine.region`
+- `markdownTranslator.llm.apiKey`
+- `markdownTranslator.llm.baseUrl`
+- `markdownTranslator.llm.model`
+
+只想换智谱模型时，直接改 `markdownTranslator.llm.model` 就够了。
+
+当前默认值是 `glm-4-flash`。这是智谱免费、速度也够快的那档。
 
 ## 命令
 

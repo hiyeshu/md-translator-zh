@@ -8,13 +8,25 @@ import { getConfigValue, updateConfigValue } from './config';
 
 const DEFAULT_TARGET_LANGUAGE = 'zh-CN';
 const VOLCENGINE_TUTORIAL_URL = 'https://github.com/hiyeshu/md-translator-zh/blob/main/docs/volcengine-machine-translation.md';
+const LLM_TUTORIAL_URL = 'https://github.com/hiyeshu/md-translator-zh/blob/main/docs/zhipu-llm-translation.md';
 function getProviderLabel(provider: string): string {
     const labels: Record<string, string> = {
         free: '免费',
         volcengine: '火山引擎',
-        google: 'Google',
+        llm: 'LLM',
+        google: 'Google（已移除）',
     };
     return labels[provider] || provider;
+}
+function normalizeString(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+function getMemoLabel(provider: string): string {
+    if (provider === 'llm') {
+        const model = normalizeString(getConfigValue('llm.model', ''));
+        return model || 'LLM';
+    }
+    return getProviderLabel(provider);
 }
 function getTargetLanguageLabel() {
     return DEFAULT_TARGET_LANGUAGE === 'zh-CN' ? '简体中文' : '繁体中文';
@@ -146,7 +158,9 @@ export class TranslationViewerProvider {
                             'volcengine.accessKeyId': getConfigValue('volcengine.accessKeyId', ''),
                             'volcengine.secretKey': getConfigValue('volcengine.secretKey', ''),
                             'volcengine.region': getConfigValue('volcengine.region', 'cn-north-1'),
-                            'google.apiKey': getConfigValue('google.apiKey', ''),
+                            'llm.apiKey': getConfigValue('llm.apiKey', ''),
+                            'llm.baseUrl': getConfigValue('llm.baseUrl', 'https://open.bigmodel.cn/api/paas/v4/'),
+                            'llm.model': getConfigValue('llm.model', 'glm-4-flash'),
                             'free.googleMirror': getConfigValue('free.googleMirror', ''),
                         }
                     });
@@ -290,6 +304,7 @@ export class TranslationViewerProvider {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
                 provider: provider,
+                displayName: getMemoLabel(provider),
                 state: 'completed'
             });
         }
@@ -301,6 +316,7 @@ export class TranslationViewerProvider {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
                 provider: currentProvider,
+                displayName: getMemoLabel(currentProvider),
                 state: 'loading'
             });
         }
@@ -391,15 +407,16 @@ export class TranslationViewerProvider {
         const costs = {
             'free': 0,
             'volcengine': 0.0000035,
-            'google': 0.00002,
+            'llm': 0.000002,
         };
-        return charCount * (costs[provider] || costs.google);
+        return charCount * (costs[provider] || costs.llm);
     }
     updateMemoToCompleted(provider: string) {
         if (this.panel) {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
                 provider: provider,
+                displayName: getMemoLabel(provider),
                 state: 'completed'
             });
         }
@@ -409,6 +426,7 @@ export class TranslationViewerProvider {
             this.panel.webview.postMessage({
                 command: 'updateMemo',
                 provider: newProvider,
+                displayName: getMemoLabel(newProvider),
                 state: 'provider-changed'
             });
         }
@@ -467,6 +485,7 @@ export class TranslationViewerProvider {
                 this.panel.webview.postMessage({
                     command: 'updateMemo',
                     provider: provider,
+                    displayName: getMemoLabel(provider),
                     state: 'delta-loading',
                     savings: savings,
                     progress: `0/${semanticDeltas.length}`
@@ -479,6 +498,7 @@ export class TranslationViewerProvider {
                     this.panel.webview.postMessage({
                         command: 'updateMemo',
                         provider: provider,
+                        displayName: getMemoLabel(provider),
                         state: 'delta-loading',
                         savings: savings,
                         progress: `${completed}/${total}`
@@ -504,6 +524,7 @@ export class TranslationViewerProvider {
                 this.panel.webview.postMessage({
                     command: 'updateMemo',
                     provider: this.currentProvider,
+                    displayName: getMemoLabel(this.currentProvider),
                     state: 'delta-completed',
                     savings: savings
                 });
@@ -728,8 +749,14 @@ export class TranslationViewerProvider {
         const errorStr = this.escapeHtml(errorMsg);
         const isKeyMissing = /还没配置|not configured/i.test(errorMsg);
         const isKeyInvalid = /无效|invalid|403|额度/i.test(errorMsg);
+        const isProviderRemoved = /Google provider 已移除|改用 LLM/i.test(errorMsg);
         let guideHtml = '';
-        if (isKeyMissing) {
+        if (isProviderRemoved) {
+            guideHtml = `
+                <p class="hint">Google 已经下线了。去设置里把服务商改成 LLM、免费，或者火山引擎。</p>
+                <button class="action" onclick="openSettings('markdownTranslator.provider')">去改设置</button>
+            `;
+        } else if (isKeyMissing) {
             guideHtml = `
                 <p class="hint">在 VS Code 设置里把当前服务商的密钥填上就能用了。</p>
                 <button class="action" onclick="openSettings('markdownTranslator')">去填设置</button>
@@ -841,7 +868,7 @@ export class TranslationViewerProvider {
         const markdownLineCount = cleanMarkdown.split('\n').length;
         const markdownGutterWidth = Math.max(44, 18 + String(markdownLineCount).length * 10);
         const currentProvider: string = getConfigValue('provider', 'free') || 'free';
-        const providerLabel = getProviderLabel(currentProvider);
+        const providerLabel = getMemoLabel(currentProvider);
         const targetLanguageLabel = getTargetLanguageLabel();
         const fileName = this.currentFileUri ? this.escapeHtml(this.getFileName(this.currentFileUri)) : '译文';
         const html = `<!DOCTYPE html>
@@ -1286,13 +1313,11 @@ export class TranslationViewerProvider {
                     <div class="provider-menu" id="providerMenu" role="menu">
                         <button type="button" class="provider-menu-item ${currentProvider === 'free' ? 'active' : ''}" data-provider="free" onclick="selectProvider(event,'free')">免费</button>
                         <button type="button" class="provider-menu-item ${currentProvider === 'volcengine' ? 'active' : ''}" data-provider="volcengine" onclick="selectProvider(event,'volcengine')">火山引擎</button>
-                        <button type="button" class="provider-menu-item ${currentProvider === 'google' ? 'active' : ''}" data-provider="google" onclick="selectProvider(event,'google')">Google</button>
+                        <button type="button" class="provider-menu-item ${currentProvider === 'llm' ? 'active' : ''}" data-provider="llm" onclick="selectProvider(event,'llm')">LLM</button>
                     </div>
                 </div>
-                <div class="toolbar-file" title="${fileName} → ${targetLanguageLabel}">
+                <div class="toolbar-file" title="${fileName}">
                     <span class="file-name">${fileName}</span>
-                    <span class="file-arrow">→</span>
-                    <span class="file-target">${targetLanguageLabel}</span>
                 </div>
             </div>
             <div class="toolbar-actions">
@@ -1315,7 +1340,7 @@ export class TranslationViewerProvider {
             <select id="drawerProvider" class="drawer-select" onchange="showProviderFields()">
                 <option value="free">免费</option>
                 <option value="volcengine">火山引擎</option>
-                <option value="google">Google</option>
+                <option value="llm">LLM</option>
             </select>
             <div id="fieldsVolcengine" class="drawer-fields" style="display:none">
                 <label class="drawer-label">AccessKey ID</label>
@@ -1328,9 +1353,16 @@ export class TranslationViewerProvider {
                     <button type="button" class="drawer-help-link" onclick="openVolcengineTutorial()">查看申请教程</button>
                 </div>
             </div>
-            <div id="fieldsGoogle" class="drawer-fields" style="display:none">
+            <div id="fieldsLlm" class="drawer-fields" style="display:none">
                 <label class="drawer-label">API Key</label>
-                <input id="googleApiKey" class="drawer-input" type="password" placeholder="AIza..." />
+                <input id="llmApiKey" class="drawer-input" type="password" placeholder="your-api-key" />
+                <label class="drawer-label">Base URL</label>
+                <input id="llmBaseUrl" class="drawer-input" type="text" placeholder="https://open.bigmodel.cn/api/paas/v4/" />
+                <label class="drawer-label">Model</label>
+                <input id="llmModel" class="drawer-input" type="text" placeholder="glm-4-flash" />
+                <div class="drawer-help">
+                    <button type="button" class="drawer-help-link" onclick="openLlmTutorial()">查看申请教程</button>
+                </div>
             </div>
             <div id="fieldsFree" class="drawer-fields" style="display:none">
                 <label class="drawer-label">Google 镜像 (可选)</label>
@@ -1434,17 +1466,30 @@ export class TranslationViewerProvider {
             function showProviderFields() {
                 var p = document.getElementById('drawerProvider').value;
                 document.getElementById('fieldsVolcengine').style.display = p === 'volcengine' ? 'block' : 'none';
-                document.getElementById('fieldsGoogle').style.display = p === 'google' ? 'block' : 'none';
+                document.getElementById('fieldsLlm').style.display = p === 'llm' ? 'block' : 'none';
                 document.getElementById('fieldsFree').style.display = p === 'free' ? 'block' : 'none';
             }
             function populateSettings(s) {
-                document.getElementById('drawerProvider').value = s.provider || 'free';
+                var provider = s.provider || 'free';
+                var supportedProviders = ['free', 'volcengine', 'llm'];
+                var isUnsupportedProvider = supportedProviders.indexOf(provider) === -1;
+                document.getElementById('drawerProvider').value = isUnsupportedProvider ? 'llm' : provider;
                 document.getElementById('volcAccessKeyId').value = s['volcengine.accessKeyId'] || '';
                 document.getElementById('volcSecretKey').value = s['volcengine.secretKey'] || '';
                 document.getElementById('volcRegion').value = s['volcengine.region'] || 'cn-north-1';
-                document.getElementById('googleApiKey').value = s['google.apiKey'] || '';
+                document.getElementById('llmApiKey').value = s['llm.apiKey'] || '';
+                document.getElementById('llmBaseUrl').value = s['llm.baseUrl'] || 'https://open.bigmodel.cn/api/paas/v4/';
+                document.getElementById('llmModel').value = s['llm.model'] || 'glm-4-flash';
                 document.getElementById('freeGoogleMirror').value = s['free.googleMirror'] || '';
                 showProviderFields();
+                var statusEl = document.getElementById('drawerStatus');
+                if (isUnsupportedProvider) {
+                    statusEl.textContent = 'Google provider 已移除，请改成 LLM / 免费 / 火山引擎';
+                    statusEl.className = 'drawer-status error';
+                } else {
+                    statusEl.textContent = '';
+                    statusEl.className = 'drawer-status';
+                }
             }
             function saveDrawerSettings() {
                 var settings = { provider: document.getElementById('drawerProvider').value };
@@ -1453,8 +1498,10 @@ export class TranslationViewerProvider {
                     settings['volcengine.accessKeyId'] = document.getElementById('volcAccessKeyId').value;
                     settings['volcengine.secretKey'] = document.getElementById('volcSecretKey').value;
                     settings['volcengine.region'] = document.getElementById('volcRegion').value || 'cn-north-1';
-                } else if (p === 'google') {
-                    settings['google.apiKey'] = document.getElementById('googleApiKey').value;
+                } else if (p === 'llm') {
+                    settings['llm.apiKey'] = document.getElementById('llmApiKey').value;
+                    settings['llm.baseUrl'] = document.getElementById('llmBaseUrl').value || 'https://open.bigmodel.cn/api/paas/v4/';
+                    settings['llm.model'] = document.getElementById('llmModel').value || 'glm-4-flash';
                 } else {
                     settings['free.googleMirror'] = document.getElementById('freeGoogleMirror').value;
                 }
@@ -1469,6 +1516,9 @@ export class TranslationViewerProvider {
             }
             function openVolcengineTutorial() {
                 vscode.postMessage({ command: 'openExternal', url: ${JSON.stringify(VOLCENGINE_TUTORIAL_URL)} });
+            }
+            function openLlmTutorial() {
+                vscode.postMessage({ command: 'openExternal', url: ${JSON.stringify(LLM_TUTORIAL_URL)} });
             }
 
             window.addEventListener('message', function(event) {
@@ -1514,7 +1564,8 @@ export class TranslationViewerProvider {
                 var providerLabels = {
                     free: '免费',
                     volcengine: '火山引擎',
-                    google: 'Google',
+                    llm: 'LLM',
+                    google: 'Google（已移除）',
                 };
                 var providerName = providerLabels[currentProvider] || currentProvider;
                 var providerButtonLabel = document.getElementById('providerButtonLabel');
@@ -1546,16 +1597,16 @@ export class TranslationViewerProvider {
                     } else if (message.command === 'refresh') {
                         syncTranslation();
                     } else if (message.command === 'updateMemo') {
-                        updateMemo(message.provider, message.state, message.savings, message.progress);
+                        updateMemo(message.provider, message.displayName, message.state, message.savings, message.progress);
                     }
                 } catch (e) {}
             });
             
-            function updateMemo(provider, state, savings, progress) {
+            function updateMemo(provider, displayName, state, savings, progress) {
                 try {
                     var memo = document.getElementById('memo');
                     if (!memo) return;
-                    var providerName = syncProvider(provider);
+                    var providerName = displayName || syncProvider(provider);
 
                     memo.className = 'memo ' + (state || '');
 
@@ -1591,6 +1642,7 @@ export class TranslationViewerProvider {
             window.saveDrawerSettings = saveDrawerSettings;
             window.testDrawerConnection = testDrawerConnection;
             window.openVolcengineTutorial = openVolcengineTutorial;
+            window.openLlmTutorial = openLlmTutorial;
             window.setViewMode = setViewMode;
             window.toggleProviderMenu = toggleProviderMenu;
             window.selectProvider = selectProvider;

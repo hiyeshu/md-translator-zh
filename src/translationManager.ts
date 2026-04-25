@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Logger } from './logger';
-import { FreeTranslateProvider, GoogleTranslateProvider, VolcengineTranslateProvider } from './translationProviders';
+import { FreeTranslateProvider, LlmTranslateProvider, VolcengineTranslateProvider } from './translationProviders';
 import { TranslationCache } from './translationCache';
 import { getConfigValue } from './config';
 import { TextNode } from './markdownProcessor';
@@ -30,7 +30,7 @@ export class TranslationManager {
     constructor(context: vscode.ExtensionContext) {
         this.providers.set('free', new FreeTranslateProvider());
         this.providers.set('volcengine', new VolcengineTranslateProvider());
-        this.providers.set('google', new GoogleTranslateProvider());
+        this.providers.set('llm', new LlmTranslateProvider());
         this.cache = new TranslationCache(context);
     }
 
@@ -48,6 +48,9 @@ export class TranslationManager {
 
     private getProvider(): TranslateProvider {
         const providerName = this.getCurrentProvider();
+        if (providerName === 'google') {
+            throw new Error('Google provider 已移除，请改用 LLM / 免费 / 火山引擎');
+        }
         const provider = this.providers.get(providerName);
         if (!provider) throw new Error(`Translation provider '${providerName}' not found`);
         return provider;

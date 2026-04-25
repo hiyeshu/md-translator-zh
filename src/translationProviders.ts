@@ -34,6 +34,31 @@ interface VolcengineTranslateResponse {
     };
 }
 
+interface OpenAiCompatibleErrorBody {
+    message?: string;
+    type?: string;
+    code?: string;
+}
+
+interface OpenAiCompatibleMessagePart {
+    type?: string;
+    text?: string;
+    content?: string;
+}
+
+interface OpenAiCompatibleChatCompletionResponse {
+    choices?: Array<{
+        message?: {
+            content?: string | OpenAiCompatibleMessagePart[];
+        };
+    }>;
+    error?: OpenAiCompatibleErrorBody;
+}
+
+interface LlmBatchJsonResponse {
+    translations?: unknown[];
+}
+
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 10, maxFreeSockets: 5, timeout: 30000 });
 const VOLCENGINE_ENDPOINT = 'https://translate.volcengineapi.com/';
 const VOLCENGINE_HOST = 'translate.volcengineapi.com';
@@ -43,6 +68,15 @@ const VOLCENGINE_SERVICE = 'translate';
 const VOLCENGINE_MAX_ITEMS = 16;
 const VOLCENGINE_MAX_TOTAL_LENGTH = 5000;
 const VOLCENGINE_MAX_RETRIES = 3;
+const LLM_DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4/';
+const LLM_DEFAULT_MODEL = 'glm-4-flash';
+const LLM_MAX_RETRIES = 3;
+const LLM_MAX_CONCURRENCY = 3;
+const LLM_TEMPERATURE = 0.2;
+const LLM_SYSTEM_PROMPT = '你是 Markdown 翻译器。把输入翻成简体中文。只返回译文，不要解释，不要加引号，不要补充说明。保留类似 {{MD0}} 的占位符不变。';
+const LLM_BATCH_SYSTEM_PROMPT = '你是 Markdown 翻译器。用户会给你一个 JSON 对象，里面有 texts 数组。把每个元素翻成简体中文，按原顺序返回 JSON 对象 {"translations":["...", "..."]}。translations 长度必须和输入完全一致。不要输出解释，不要输出 Markdown 代码块，不要输出额外字段。保留类似 {{MD0}} 的占位符不变。';
+const LLM_BATCH_MAX_ITEMS = 12;
+const LLM_BATCH_MAX_TOTAL_CHARS = 6000;
 
 function httpsRequest(url: string, options: { method?: string; headers?: Record<string, string>; body?: string }): Promise<HttpResponse> {
     return new Promise((resolve, reject) => {
@@ -98,6 +132,143 @@ function getFreeGoogleMirror(): string {
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeBaseUrl(value: string, fallback: string): string {
+    const normalized = normalizeString(value) || fallback;
+    return normalized.replace(/\/+$/, '');
+}
+
+function buildOpenAiCompatibleUrl(baseUrl: string): string {
+    const normalized = normalizeBaseUrl(baseUrl, LLM_DEFAULT_BASE_URL);
+    return /\/chat\/completions$/i.test(normalized) ? normalized : `${normalized}/chat/completions`;
+}
+
+function parseJsonResponse<T>(raw: string, providerName: string): T {
+    try {
+        return raw ? JSON.parse(raw) as T : {} as T;
+    } catch {
+        throw new Error(`${providerName} 返回了非 JSON 响应：${raw || '<empty>'}`);
+    }
+}
+
+function extractOpenAiCompatibleText(result: OpenAiCompatibleChatCompletionResponse): string {
+    const content = result.choices?.[0]?.message?.content;
+    if (typeof content === 'string') {
+        return normalizeString(content);
+    }
+    if (Array.isArray(content)) {
+        return normalizeString(content.map(part => normalizeString(part?.text || part?.content)).filter(Boolean).join(''));
+    }
+    return '';
+}
+
+async function requestOpenAiCompatibleTranslation(options: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    text: string;
+}): Promise<string> {
+    const body = JSON.stringify({
+        model: options.model,
+        messages: [
+            { role: 'system', content: LLM_SYSTEM_PROMPT },
+            { role: 'user', content: options.text }
+        ],
+        temperature: LLM_TEMPERATURE,
+        stream: false
+    });
+    const response = await httpsRequest(buildOpenAiCompatibleUrl(options.baseUrl), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${options.apiKey}`
+        },
+        body
+    });
+    const raw = await response.text();
+    const parsed = parseJsonResponse<OpenAiCompatibleChatCompletionResponse>(raw, 'LLM');
+    const apiMessage = normalizeString(parsed.error?.message);
+    if (!response.ok) {
+        throw new Error(`LLM 请求失败：HTTP ${response.status}${apiMessage ? ` ${apiMessage}` : ''}`);
+    }
+    if (apiMessage && !parsed.choices?.length) {
+        throw new Error(`LLM 请求失败：${apiMessage}`);
+    }
+    const translated = extractOpenAiCompatibleText(parsed);
+    if (!translated) throw new Error('LLM 返回为空');
+    return translated;
+}
+
+async function requestOpenAiCompatibleBatchTranslation(options: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    texts: string[];
+}): Promise<string[]> {
+    const body = JSON.stringify({
+        model: options.model,
+        messages: [
+            { role: 'system', content: LLM_BATCH_SYSTEM_PROMPT },
+            { role: 'user', content: JSON.stringify({ texts: options.texts }) }
+        ],
+        temperature: LLM_TEMPERATURE,
+        stream: false,
+        response_format: {
+            type: 'json_object'
+        }
+    });
+    const response = await httpsRequest(buildOpenAiCompatibleUrl(options.baseUrl), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${options.apiKey}`
+        },
+        body
+    });
+    const raw = await response.text();
+    const parsed = parseJsonResponse<OpenAiCompatibleChatCompletionResponse>(raw, 'LLM');
+    const apiMessage = normalizeString(parsed.error?.message);
+    if (!response.ok) {
+        throw new Error(`LLM 批量请求失败：HTTP ${response.status}${apiMessage ? ` ${apiMessage}` : ''}`);
+    }
+    if (apiMessage && !parsed.choices?.length) {
+        throw new Error(`LLM 批量请求失败：${apiMessage}`);
+    }
+    const content = extractOpenAiCompatibleText(parsed);
+    if (!content) throw new Error('LLM 批量返回为空');
+    const result = parseJsonResponse<LlmBatchJsonResponse>(content, 'LLM 批量');
+    if (!Array.isArray(result.translations)) {
+        throw new Error('LLM 批量返回缺少 translations 数组');
+    }
+    if (result.translations.length !== options.texts.length) {
+        throw new Error(`LLM 批量返回数量不对：期望 ${options.texts.length}，实际 ${result.translations.length}`);
+    }
+    return result.translations.map((item, index) => {
+        const translated = typeof item === 'string' ? item.trim() : '';
+        if (!translated) throw new Error(`LLM 批量第 ${index + 1} 条返回为空`);
+        return translated;
+    });
+}
+
+function chunkLlmBatchTexts(texts: string[]): string[][] {
+    const chunks: string[][] = [];
+    let currentChunk: string[] = [];
+    let currentLength = 0;
+    for (const text of texts) {
+        const nextLength = text.length;
+        const exceedsItemLimit = currentChunk.length >= LLM_BATCH_MAX_ITEMS;
+        const exceedsCharLimit = currentLength + nextLength > LLM_BATCH_MAX_TOTAL_CHARS;
+        if (currentChunk.length > 0 && (exceedsItemLimit || exceedsCharLimit)) {
+            chunks.push(currentChunk);
+            currentChunk = [];
+            currentLength = 0;
+        }
+        currentChunk.push(text);
+        currentLength += nextLength;
+    }
+    if (currentChunk.length > 0) chunks.push(currentChunk);
+    return chunks;
 }
 
 export class FreeTranslateProvider {
@@ -172,45 +343,63 @@ export class FreeTranslateProvider {
         }
     }
 }
-export class GoogleTranslateProvider {
-    private static readonly MAX_RETRIES = 3;
-    private static readonly RETRY_DELAY = 1000;
-
+export class LlmTranslateProvider {
     async translate(text: string): Promise<string> {
-        const apiKey = normalizeString(getConfigValue('google.apiKey', ''));
-        if (!apiKey) throw new Error('Google Translate API Key 还没配置');
+        const apiKey = normalizeString(getConfigValue('llm.apiKey', ''));
+        const baseUrl = normalizeBaseUrl(getConfigValue('llm.baseUrl', LLM_DEFAULT_BASE_URL), LLM_DEFAULT_BASE_URL);
+        const model = normalizeString(getConfigValue('llm.model', LLM_DEFAULT_MODEL)) || LLM_DEFAULT_MODEL;
+        if (!apiKey) throw new Error('LLM API Key 还没配置');
         let lastError: Error | null = null;
-        for (let attempt = 1; attempt <= GoogleTranslateProvider.MAX_RETRIES; attempt++) {
+        for (let attempt = 1; attempt <= LLM_MAX_RETRIES; attempt++) {
             try {
-                const response = await httpsRequest(`https://translation.googleapis.com/language/translate/v2?key=${apiKey}`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ q: text, target: DEFAULT_TARGET_LANGUAGE, format: 'text' })
-                });
-                if (!response.ok) { const errorText = await response.text(); throw new Error(`HTTP ${response.status}: ${errorText}`); }
-                const result = await response.json() as { data?: { translations?: { translatedText?: string }[] } };
-                const translatedText = result.data?.translations?.[0]?.translatedText;
-                if (!translatedText) throw new Error('Google 返回的数据不对');
-                return translatedText;
+                return await requestOpenAiCompatibleTranslation({ apiKey, baseUrl, model, text });
             } catch (error) {
-                lastError = error instanceof Error ? error : new Error('Unknown error');
-                if (attempt < GoogleTranslateProvider.MAX_RETRIES) {
-                    await new Promise(resolve => setTimeout(resolve, GoogleTranslateProvider.RETRY_DELAY * attempt));
-                }
+                lastError = error instanceof Error ? error : new Error('LLM 请求失败');
+                if (!this._shouldRetry(lastError) || attempt === LLM_MAX_RETRIES) break;
+                await sleep(400 * Math.pow(2, attempt - 1));
             }
         }
-        throw new Error(`Google Translate 请求失败：${lastError?.message}`);
+        throw lastError || new Error('LLM 请求失败');
+    }
+
+    async translateBatch(texts: string[]): Promise<string[]> {
+        if (texts.length === 0) return [];
+        const apiKey = normalizeString(getConfigValue('llm.apiKey', ''));
+        const baseUrl = normalizeBaseUrl(getConfigValue('llm.baseUrl', LLM_DEFAULT_BASE_URL), LLM_DEFAULT_BASE_URL);
+        const model = normalizeString(getConfigValue('llm.model', LLM_DEFAULT_MODEL)) || LLM_DEFAULT_MODEL;
+        if (!apiKey) throw new Error('LLM API Key 还没配置');
+        const chunks = chunkLlmBatchTexts(texts);
+        const results: string[] = [];
+        for (const chunk of chunks) {
+            let lastError: Error | null = null;
+            for (let attempt = 1; attempt <= LLM_MAX_RETRIES; attempt++) {
+                try {
+                    const translatedChunk = await requestOpenAiCompatibleBatchTranslation({ apiKey, baseUrl, model, texts: chunk });
+                    results.push(...translatedChunk);
+                    lastError = null;
+                    break;
+                } catch (error) {
+                    lastError = error instanceof Error ? error : new Error('LLM 批量请求失败');
+                    if (!this._shouldRetry(lastError) || attempt === LLM_MAX_RETRIES) break;
+                    await sleep(400 * Math.pow(2, attempt - 1));
+                }
+            }
+            if (lastError) throw lastError;
+        }
+        return results;
     }
 
     async getQuota(): Promise<QuotaInfo> {
-        const apiKey = normalizeString(getConfigValue('google.apiKey', ''));
-        if (!apiKey) return { error: 'API Key 还没配置' };
         try {
-            const response = await httpsRequest(`https://translation.googleapis.com/language/translate/v2/languages?key=${apiKey}&target=en`, {
-                method: 'GET', headers: { 'Content-Type': 'application/json' }
-            });
-            if (response.ok) return { currency: 'USD', resetDate: '请去 Google Cloud Console 看实际用量', error: 'Google 不会在这里直接返回剩余额度' };
-            return { error: 'API Key 无效，或者额度已经超了' };
-        } catch { return { error: '拿不到额度信息' }; }
+            await this.translate('hello');
+            return { resetDate: '请去对应 LLM 平台查看实际用量', error: '' };
+        } catch (error) {
+            return { error: error instanceof Error ? error.message : '连接失败' };
+        }
+    }
+
+    private _shouldRetry(error: Error): boolean {
+        return /HTTP 429|HTTP 5\d{2}|timeout|timed out|ECONNRESET|ENOTFOUND|socket hang up/i.test(error.message);
     }
 }
 export class VolcengineTranslateProvider {

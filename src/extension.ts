@@ -15,7 +15,8 @@ function getProviderLabel(providerName: string): string {
     const labels: Record<string, string> = {
         free: '免费',
         volcengine: '火山引擎',
-        google: 'Google',
+        llm: 'LLM',
+        google: 'Google（已移除）',
     };
     return labels[providerName] || providerName;
 }
@@ -107,15 +108,19 @@ async function openViewer(
 async function testConnection(context: vscode.ExtensionContext) {
     const manager = getTranslationManager(context);
     const providerName = manager.getCurrentProvider();
-    const provider = manager.getCurrentProviderInstance();
     const providerLabel = getProviderLabel(providerName);
 
     statusBarManager?.showTranslating();
 
     try {
-        if (providerName === 'free') {
+        const provider = manager.getCurrentProviderInstance();
+
+        if (providerName === 'free' || providerName === 'llm') {
             await provider.translate('Connection test');
-            vscode.window.showInformationMessage('免费可用。稳定性不保证。');
+            const successMessage = providerName === 'free'
+                ? '免费可用。稳定性不保证。'
+                : 'LLM 连接正常。';
+            vscode.window.showInformationMessage(successMessage);
             statusBarManager?.showReady();
             return;
         }
