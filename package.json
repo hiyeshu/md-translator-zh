@@ -167,7 +167,9 @@
 		"watch": "tsc -watch -p ./",
 		"package": "npx @vscode/vsce package --out dist/",
 		"clean": "rm -rf out dist/*.vsix",
-		"prepackage": "npm run compile"
+		"prepackage": "npm run compile",
+		"release": "npm version patch && npm run package && npx ovsx publish dist/*.vsix -p $OVSX_TOKEN",
+		"release:minor": "npm version minor && npm run package && npx ovsx publish dist/*.vsix -p $OVSX_TOKEN"
 	},
 	"devDependencies": {
 		"@types/node": "16.x",

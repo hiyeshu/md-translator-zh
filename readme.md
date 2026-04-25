@@ -16,6 +16,14 @@
 
 ---
 
+## 安装
+
+在 Cursor 扩展面板搜索 `md-translator-zh`，点安装。
+
+或者手动装：[Releases](https://github.com/hiyeshu/md-translator-zh/releases) 下载 `.vsix` 文件，Cursor 里按 `Cmd+Shift+P` → `Install from VSIX`。
+
+---
+
 打开任意 `.md` 文件，按 `Cmd+Shift+T`（Windows `Ctrl+Shift+T`），左边原文右边译文。
 
 ## 特点
@@ -61,7 +69,7 @@
 | 测试连接 | 命令面板 | 检查当前服务商 |
 | 清除缓存 | 命令面板 | 重新翻译所有内容 |
 
-也可以右键 `.md` 文件或在编辑器标题栏点地球图标打开。
+也可以右键 `.md` 文件打开。
 
 ## 隐私
 
