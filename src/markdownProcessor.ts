@@ -1,3 +1,5 @@
+import * as vscode from 'vscode';
+
 export interface TextNode {
     value: string;
     original: string;
@@ -234,7 +236,20 @@ export class MarkdownProcessor {
         }
         return result.join('\n');
     }
-    convertToHtml(markdown: string): string {
+    async convertToHtml(markdown: string): Promise<string> {
+        try {
+            const rendered = await vscode.commands.executeCommand<string>('markdown.api.render', markdown);
+            if (typeof rendered === 'string' && rendered.trim()) {
+                return rendered;
+            }
+        } catch {
+            // Fall back to the lightweight renderer when the built-in Markdown API is unavailable.
+        }
+
+        return this.convertToHtmlFallback(markdown);
+    }
+
+    private convertToHtmlFallback(markdown: string): string {
         const lines = markdown.split('\n');
         const html: string[] = ['<div class="markdown-content">'];
         let inCodeBlock = false;

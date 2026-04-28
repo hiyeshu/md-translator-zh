@@ -47,6 +47,7 @@ export class TranslationViewerProvider {
     private translationState: string = 'empty';
     private currentFileContent = '';
     private lastTranslatedNodes: TextNode[] = [];
+    private hoverLineDecoration?: vscode.TextEditorDecorationType;
     translationManager: TranslationManager;
     private panel?: vscode.WebviewPanel;
     private currentFileUri?: vscode.Uri;
@@ -131,7 +132,7 @@ export class TranslationViewerProvider {
             Logger.error('Auto-translation failed:', error instanceof Error ? error : undefined);
         }
     }
-    async handleWebviewMessage(message: { command: string; provider?: string; content?: string; query?: string; url?: string; settings?: Record<string, string> }, fileUri: vscode.Uri) {
+    async handleWebviewMessage(message: { command: string; provider?: string; content?: string; query?: string; url?: string; settings?: Record<string, string>; line?: number }, fileUri: vscode.Uri) {
         try {
             switch (message.command) {
                 case 'save':
@@ -167,11 +168,16 @@ export class TranslationViewerProvider {
                     break;
                 case 'saveSettings':
                     if (message.settings) {
+                        const previousProvider = getConfigValue('provider', 'free') || 'free';
                         for (const [key, value] of Object.entries(message.settings)) {
                             await updateConfigValue(key, value, vscode.ConfigurationTarget.Global);
                         }
                         vscode.window.showInformationMessage('设置已保存');
                         this.panel?.webview.postMessage({ command: 'settingsSaved' });
+                        const nextProvider = getConfigValue('provider', 'free') || 'free';
+                        if (nextProvider !== previousProvider) {
+                            await this.changeProvider(nextProvider, fileUri);
+                        }
                     }
                     break;
                 case 'testConnection': {
@@ -191,6 +197,12 @@ export class TranslationViewerProvider {
                     if (typeof message.url === 'string' && message.url) {
                         await vscode.env.openExternal(vscode.Uri.parse(message.url));
                     }
+                    break;
+                case 'hoverSourceLine':
+                    this.highlightSourceLine(fileUri, message.line);
+                    break;
+                case 'clearSourceLineHover':
+                    this.clearSourceLineHighlight();
                     break;
                 default:
                     console.warn('Unknown webview message:', message.command);
@@ -255,8 +267,8 @@ export class TranslationViewerProvider {
             this.translationManager.cacheFileTranslation(fileUri.fsPath, content, translatedNodes);
             const translatedMarkdown = this.markdownProcessor.reconstructMarkdown(content, translatedNodes);
             // Convert to HTML for better rendering
-            const originalHtml = this.markdownProcessor.convertToHtml(content);
-            const translatedHtml = this.markdownProcessor.convertToHtml(translatedMarkdown);
+            const originalHtml = await this.markdownProcessor.convertToHtml(content);
+            const translatedHtml = await this.markdownProcessor.convertToHtml(translatedMarkdown);
             if (this.panel && this.currentFileUri?.fsPath === fileUri.fsPath) {
                 this.updateTranslationComplete(translatedMarkdown);
                 this.panel.webview.html = this.getWebviewContent(originalHtml, translatedHtml, translatedMarkdown);
@@ -289,9 +301,8 @@ export class TranslationViewerProvider {
             this.updateMemoToCompleted(provider);
         }
         else {
-            // Different provider - show warning
-            vscode.window.showInformationMessage(`已切到 ${providerLabel}，当前译文还没同步。`);
-            this.updateMemoOnly(provider);
+            vscode.window.showInformationMessage(`已切到 ${providerLabel}，正在刷新译文。`);
+            await this.forceRefresh(fileUri);
         }
     }
     updateTranslationComplete(translatedMarkdown: string) {
@@ -434,6 +445,9 @@ export class TranslationViewerProvider {
     cleanup() {
         clearTimeout(this.updateTimeout);
         this.updateTimeout = undefined;
+        this.clearSourceLineHighlight();
+        this.hoverLineDecoration?.dispose();
+        this.hoverLineDecoration = undefined;
         this.panel = undefined;
         this.currentFileUri = undefined;
         this.currentFileContent = '';
@@ -441,6 +455,31 @@ export class TranslationViewerProvider {
         this.currentTranslatedContent = '';
         this.isUpdating = false;
         this.translationState = 'empty';
+    }
+    private getHoverLineDecoration(): vscode.TextEditorDecorationType {
+        if (!this.hoverLineDecoration) {
+            this.hoverLineDecoration = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                backgroundColor: new vscode.ThemeColor('editor.hoverHighlightBackground'),
+                overviewRulerColor: new vscode.ThemeColor('editor.hoverHighlightBackground'),
+                overviewRulerLane: vscode.OverviewRulerLane.Full
+            });
+        }
+        return this.hoverLineDecoration;
+    }
+    private highlightSourceLine(fileUri: vscode.Uri, line?: number) {
+        if (typeof line !== 'number' || line < 1) return;
+        const editor = vscode.window.visibleTextEditors.find(item => item.document.uri.fsPath === fileUri.fsPath);
+        if (!editor) return;
+        const lineIndex = Math.min(line - 1, Math.max(editor.document.lineCount - 1, 0));
+        const range = editor.document.lineAt(lineIndex).range;
+        editor.setDecorations(this.getHoverLineDecoration(), [range]);
+    }
+    private clearSourceLineHighlight() {
+        if (!this.hoverLineDecoration) return;
+        for (const editor of vscode.window.visibleTextEditors) {
+            editor.setDecorations(this.hoverLineDecoration, []);
+        }
     }
     getFileName(uri: vscode.Uri) {
         return path.basename(uri.fsPath) || 'Unknown';
@@ -515,8 +554,8 @@ export class TranslationViewerProvider {
                 throw new Error('Translation result appears corrupted');
             }
             // Update display
-            const originalHtml = this.markdownProcessor.convertToHtml(newContent);
-            const translatedHtml = this.markdownProcessor.convertToHtml(translatedContent);
+            const originalHtml = await this.markdownProcessor.convertToHtml(newContent);
+            const translatedHtml = await this.markdownProcessor.convertToHtml(translatedContent);
             if (this.panel && this.currentFileUri?.fsPath === fileUri.fsPath) {
                 this.updateTranslationComplete(translatedContent);
                 this.currentFileContent = newContent;
@@ -599,8 +638,8 @@ export class TranslationViewerProvider {
                 const cachedNodes = this.translationManager.getCachedFileTranslation(fileUri.fsPath);
                 if (cachedNodes && this.panel) {
                     const translatedMarkdown = this.markdownProcessor.reconstructMarkdown(content, cachedNodes);
-                    const originalHtml = this.markdownProcessor.convertToHtml(content);
-                    const translatedHtml = this.markdownProcessor.convertToHtml(translatedMarkdown);
+                    const originalHtml = await this.markdownProcessor.convertToHtml(content);
+                    const translatedHtml = await this.markdownProcessor.convertToHtml(translatedMarkdown);
                     this.updateTranslationComplete(translatedMarkdown);
                     this.currentFileContent = content;
                     this.lastTranslatedNodes = cachedNodes;
@@ -633,8 +672,8 @@ export class TranslationViewerProvider {
             }));
             this.translationManager.cacheFileTranslation(fileUri.fsPath, content, translatedNodes);
             const translatedMarkdown = this.markdownProcessor.reconstructMarkdown(content, translatedNodes);
-            const originalHtml = this.markdownProcessor.convertToHtml(content);
-            const translatedHtml = this.markdownProcessor.convertToHtml(translatedMarkdown);
+            const originalHtml = await this.markdownProcessor.convertToHtml(content);
+            const translatedHtml = await this.markdownProcessor.convertToHtml(translatedMarkdown);
             if (this.panel && this.currentFileUri?.fsPath === fileUri.fsPath) {
                 this.updateTranslationComplete(translatedMarkdown);
                 this.panel.webview.html = this.getWebviewContent(originalHtml, translatedHtml, translatedMarkdown);
@@ -892,6 +931,10 @@ export class TranslationViewerProvider {
             display: flex;
             flex-direction: column;
             height: 100vh;
+            overflow: hidden;
+        }
+        html {
+            overflow: hidden;
         }
         .header {
             flex-shrink: 0;
@@ -899,13 +942,22 @@ export class TranslationViewerProvider {
             top: 0;
             z-index: 100;
             background: var(--vscode-editor-background);
-            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 1px;
+            background: var(--vscode-panel-border);
+            pointer-events: none;
         }
         .toolbar {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 14px 20px 12px;
+            gap: 8px;
+            padding: 8px 12px;
             flex-wrap: nowrap;
             overflow: visible;
         }
@@ -920,31 +972,36 @@ export class TranslationViewerProvider {
         .segmented {
             display: inline-flex;
             align-items: center;
-            gap: 2px;
-            padding: 3px;
-            border-radius: 9999px;
-            background: var(--vscode-editor-inactiveSelectionBackground, var(--vscode-textBlockQuote-background));
-            border: 1px solid rgba(127,127,127,0.12);
+            gap: 4px;
+            padding: 0;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
         }
         .segment-btn {
-            height: 28px;
-            padding: 0 14px;
+            position: relative;
+            height: 26px;
+            padding: 0 12px;
             border: none;
-            border-radius: 9999px;
+            border-radius: 7px;
             background: transparent;
-            color: var(--vscode-descriptionForeground);
+            color: var(--vscode-foreground);
+            opacity: 0.68;
             font-size: 12px;
             font-family: inherit;
             cursor: pointer;
             white-space: nowrap;
-            transition: color 0.15s, background 0.15s;
+            transition: color 0.15s, background 0.15s, opacity 0.15s;
         }
         .segment-btn.active {
-            background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground));
-            color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+            background: var(--vscode-list-activeSelectionBackground, #4a4a4a);
+            color: var(--vscode-foreground);
+            opacity: 1;
         }
         .segment-btn:hover:not(.active) {
             color: var(--vscode-foreground);
+            background: var(--vscode-toolbar-hoverBackground);
+            opacity: 0.9;
         }
         .provider-wrap {
             position: relative;
@@ -953,12 +1010,12 @@ export class TranslationViewerProvider {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            height: 28px;
-            padding: 0 12px;
-            border-radius: 9999px;
-            border: 1px solid rgba(127,127,127,0.12);
-            background: transparent;
-            color: var(--vscode-foreground);
+            height: 26px;
+            padding: 0 9px;
+            border-radius: 7px;
+            border: 1px solid var(--vscode-dropdown-border);
+            background: var(--vscode-dropdown-background);
+            color: var(--vscode-dropdown-foreground);
             cursor: pointer;
             font-family: inherit;
             font-size: 12px;
@@ -966,7 +1023,7 @@ export class TranslationViewerProvider {
             transition: background 0.15s;
         }
         .provider-button:hover {
-            background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,0.08));
+            background: var(--vscode-toolbar-hoverBackground);
         }
         .provider-button-arrow {
             font-size: 9px;
@@ -975,21 +1032,21 @@ export class TranslationViewerProvider {
         .provider-menu {
             display: none;
             position: absolute;
-            top: calc(100% + 6px);
+            top: calc(100% + 4px);
             left: 0;
             background: var(--vscode-menu-background, var(--vscode-dropdown-background));
-            border: 1px solid rgba(127,127,127,0.15);
-            border-radius: 10px;
-            padding: 4px;
+            border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+            border-radius: 8px;
+            padding: 2px;
             min-width: 140px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.24);
             z-index: 200;
         }
         .provider-menu.open { display: block; }
         .provider-menu-item {
             display: block;
             width: 100%;
-            padding: 7px 12px;
+            padding: 5px 10px;
             font-size: 12px;
             color: var(--vscode-menu-foreground, var(--vscode-foreground));
             background: none;
@@ -1001,7 +1058,7 @@ export class TranslationViewerProvider {
             transition: background 0.1s;
         }
         .provider-menu-item:hover {
-            background: var(--vscode-menu-selectionBackground, rgba(127,127,127,0.1));
+            background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
             color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
         }
         .provider-menu-item.active {
@@ -1009,9 +1066,9 @@ export class TranslationViewerProvider {
             pointer-events: none;
         }
         .toolbar-file {
+            display: none;
             min-width: 0;
             flex: 1;
-            display: flex;
             align-items: center;
             gap: 6px;
             color: var(--vscode-descriptionForeground);
@@ -1042,9 +1099,9 @@ export class TranslationViewerProvider {
             flex: none;
         }
         .toolbar-btn {
-            height: 28px;
-            padding: 0 10px;
-            border-radius: 6px;
+            height: 26px;
+            padding: 0 8px;
+            border-radius: 7px;
             border: none;
             background: transparent;
             color: var(--vscode-descriptionForeground);
@@ -1056,10 +1113,10 @@ export class TranslationViewerProvider {
         }
         .toolbar-btn:hover {
             color: var(--vscode-foreground);
-            background: rgba(127,127,127,0.08);
+            background: var(--vscode-toolbar-hoverBackground);
         }
         .memo {
-            padding: 6px 20px 8px;
+            padding: 4px 12px 7px;
             font-size: 11px;
             color: var(--vscode-descriptionForeground);
             opacity: 0.6;
@@ -1071,10 +1128,41 @@ export class TranslationViewerProvider {
         }
         .content {
             flex: 1;
+            min-height: 0;
             padding: 16px 24px 28px;
             overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: transparent transparent;
             line-height: var(--vscode-editor-line-height, 1.6);
             font-size: var(--vscode-editor-font-size, 14px);
+        }
+        .content::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        .content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .content::-webkit-scrollbar-thumb {
+            background: transparent;
+            border-radius: 999px;
+        }
+        .content:hover::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        .content:hover {
+            scrollbar-width: thin;
+            scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+        }
+        .content:hover::-webkit-scrollbar-thumb {
+            background: var(--vscode-scrollbarSlider-background);
+        }
+        .content:hover::-webkit-scrollbar-thumb:hover {
+            background: var(--vscode-scrollbarSlider-hoverBackground);
+        }
+        .content:hover::-webkit-scrollbar-thumb:active {
+            background: var(--vscode-scrollbarSlider-activeBackground);
         }
         .content-shell {
             width: min(880px, 100%);
@@ -1086,12 +1174,45 @@ export class TranslationViewerProvider {
         .view.active {
             display: block;
         }
+        .markdown-body {
+            font-family: var(--vscode-markdown-font-family, var(--vscode-font-family));
+            font-size: var(--vscode-markdown-font-size, var(--vscode-font-size, 14px));
+            line-height: var(--vscode-markdown-line-height, 1.6);
+            color: var(--vscode-editor-foreground);
+            word-wrap: break-word;
+        }
+        .markdown-body > :first-child {
+            margin-top: 0;
+        }
+        .markdown-body > :last-child {
+            margin-bottom: 0;
+        }
+        .markdown-body a {
+            color: var(--vscode-textLink-foreground);
+            text-decoration: none;
+        }
+        .markdown-body a:hover {
+            color: var(--vscode-textLink-activeForeground);
+            text-decoration: underline;
+        }
+        .markdown-body hr {
+            border: 0;
+            border-top: 1px solid var(--vscode-panel-border);
+            margin: 20px 0;
+        }
+        .markdown-body img {
+            max-width: 100%;
+            box-sizing: content-box;
+        }
+        .markdown-body input[type="checkbox"] {
+            margin-right: 0.5em;
+        }
         .view-preview pre {
-            background: var(--vscode-textBlockQuote-background);
+            background: var(--vscode-textCodeBlock-background);
             padding: 14px 16px;
-            border-radius: 8px;
+            border-radius: 3px;
             overflow-x: auto;
-            border: 1px solid rgba(127,127,127,0.1);
+            border: 1px solid var(--vscode-widget-border);
             margin: 14px 0;
             line-height: 1.5;
         }
@@ -1099,20 +1220,22 @@ export class TranslationViewerProvider {
             background: none;
             padding: 0;
             border-radius: 0;
-            font-family: 'Courier New', monospace;
+            font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
             line-height: inherit;
         }
         .view-preview code {
-            background: var(--vscode-textBlockQuote-background);
+            background: var(--vscode-textCodeBlock-background);
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: 'Courier New', monospace;
+            font-family: var(--vscode-editor-font-family, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace);
         }
         .view-preview blockquote {
-            border-left: 3px solid rgba(127,127,127,0.2);
+            border-left: 5px solid var(--vscode-textBlockQuote-border);
+            background: var(--vscode-textBlockQuote-background);
             margin: 16px 0;
-            padding-left: 16px;
+            padding: 0 16px 0 10px;
             color: var(--vscode-descriptionForeground);
+            border-radius: 2px;
         }
         .view-preview table {
             border-collapse: collapse;
@@ -1120,12 +1243,12 @@ export class TranslationViewerProvider {
             margin: 16px 0;
         }
         .view-preview th, .view-preview td {
-            border: 1px solid rgba(127,127,127,0.12);
+            border: 1px solid var(--vscode-panel-border);
             padding: 10px 14px;
             text-align: left;
         }
         .view-preview th {
-            background: var(--vscode-textBlockQuote-background);
+            background: var(--vscode-editor-inactiveSelectionBackground);
             font-weight: 600;
         }
         .view-preview h1, .view-preview h2, .view-preview h3, .view-preview h4, .view-preview h5, .view-preview h6 {
@@ -1144,7 +1267,7 @@ export class TranslationViewerProvider {
         }
         .markdown-source {
             margin: 0;
-            border: 1px solid rgba(127,127,127,0.1);
+            border: 1px solid var(--vscode-panel-border);
             border-radius: 10px;
             background: var(--vscode-editor-background);
             overflow-x: auto;
@@ -1225,76 +1348,89 @@ export class TranslationViewerProvider {
         }
         /* ---- 设置抽屉 ---- */
         .drawer-overlay {
-            display: none; position: fixed; inset: 0; background: rgba(38,37,30,0.3); z-index: 900;
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.18); z-index: 900;
         }
         .drawer-overlay.open { display: block; }
         .drawer {
             position: fixed; top: 0; right: -360px; width: 340px; height: 100%; z-index: 901;
-            background: var(--vscode-sideBar-background, #f2f1ed);
-            border-left: 1px solid rgba(38,37,30,0.15);
-            box-shadow: -8px 0 32px rgba(38,37,30,0.12);
-            transition: right 0.25s ease; display: flex; flex-direction: column;
+            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+            border-left: 1px solid var(--vscode-panel-border);
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+            box-shadow: -4px 0 12px rgba(0,0,0,0.22);
+            transition: right 0.18s ease; display: flex; flex-direction: column;
             font-family: var(--vscode-font-family, system-ui);
+            overflow: hidden;
         }
         .drawer.open { right: 0; }
         .drawer-header {
             display: flex; justify-content: space-between; align-items: center;
-            padding: 16px 20px; border-bottom: 1px solid rgba(38,37,30,0.1);
+            padding: 12px 14px; border-bottom: 1px solid var(--vscode-panel-border);
         }
-        .drawer-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--vscode-foreground, #26251e); }
+        .drawer-header h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground)); }
         .drawer-close {
-            background: none; border: none; font-size: 18px; cursor: pointer;
-            color: var(--vscode-foreground, #26251e); opacity: 0.5; padding: 4px 8px; border-radius: 4px;
+            background: none; border: none; font-size: 16px; cursor: pointer;
+            color: var(--vscode-icon-foreground, var(--vscode-foreground)); opacity: 0.7; padding: 3px 7px; border-radius: 4px;
         }
-        .drawer-close:hover { opacity: 1; background: rgba(38,37,30,0.06); }
-        .drawer-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .drawer-close:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground); }
+        .drawer-body { padding: 14px; overflow-y: auto; flex: 1; }
         .drawer-label {
-            display: block; font-size: 12px; font-weight: 500; margin: 12px 0 4px;
-            color: var(--vscode-foreground, #26251e); opacity: 0.7;
+            display: block; font-size: 12px; font-weight: 500; margin: 12px 0 5px;
+            color: var(--vscode-descriptionForeground);
+            opacity: 1;
         }
         .drawer-label:first-child { margin-top: 0; }
         .drawer-select, .drawer-input {
-            width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px;
-            border: 1px solid rgba(38,37,30,0.15); border-radius: 6px;
-            background: var(--vscode-input-background, #fff);
-            color: var(--vscode-input-foreground, #26251e);
+            width: 100%; box-sizing: border-box; padding: 5px 7px; font-size: 13px;
+            border: 1px solid var(--vscode-input-border, transparent); border-radius: 5px;
+            background: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
         }
-        .drawer-select:focus, .drawer-input:focus { outline: none; border-color: #cf2d56; }
+        .drawer-select:focus, .drawer-input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
         .drawer-fields { margin-top: 4px; }
         .drawer-help { margin-top: 10px; }
         .drawer-help-link {
             display: inline-flex; align-items: center; padding: 0;
             border: none; background: transparent; cursor: pointer;
-            font-size: 12px; color: var(--vscode-textLink-foreground, #cf2d56);
+            font-size: 12px; color: var(--vscode-textLink-foreground);
             text-decoration: none;
         }
-        .drawer-help-link:hover { opacity: 0.8; }
-        .drawer-actions { display: flex; gap: 8px; margin-top: 20px; }
+        .drawer-help-link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+        .drawer-actions { display: flex; gap: 8px; margin-top: 18px; }
         .drawer-btn {
-            flex: 1; padding: 8px 0; font-size: 13px; border-radius: 6px; cursor: pointer;
-            border: 1px solid rgba(38,37,30,0.15); font-weight: 500;
+            flex: 1; padding: 5px 0; font-size: 13px; border-radius: 5px; cursor: pointer;
+            border: 1px solid transparent; font-weight: 400;
         }
         .drawer-btn-primary {
-            background: #26251e; color: #f2f1ed; border-color: #26251e;
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+            border-color: var(--vscode-panel-border);
         }
-        .drawer-btn-primary:hover { background: #cf2d56; border-color: #cf2d56; }
-        .drawer-btn-secondary { background: transparent; color: var(--vscode-foreground, #26251e); }
-        .drawer-btn-secondary:hover { background: rgba(38,37,30,0.06); }
+        .drawer-btn-primary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+        .drawer-btn-secondary {
+            background: transparent;
+            color: var(--vscode-descriptionForeground);
+            border-color: transparent;
+        }
+        .drawer-btn-secondary:hover {
+            color: var(--vscode-foreground);
+            background: var(--vscode-toolbar-hoverBackground);
+        }
         .drawer-status {
             margin-top: 12px; font-size: 12px; min-height: 18px;
-            color: var(--vscode-foreground, #26251e); opacity: 0.7;
+            color: var(--vscode-descriptionForeground); opacity: 1;
         }
-        .drawer-status.success { color: #1f8a65; opacity: 1; }
-        .drawer-status.error { color: #cf2d56; opacity: 1; }
+        .drawer-status.success { color: var(--vscode-testing-iconPassed); opacity: 1; }
+        .drawer-status.error { color: var(--vscode-errorForeground); opacity: 1; }
         .drawer-footer {
-            margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(38,37,30,0.1);
+            margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--vscode-panel-border);
             display: flex; gap: 16px;
         }
         .drawer-link {
-            font-size: 12px; color: var(--vscode-foreground, #26251e); opacity: 0.5;
+            font-size: 12px; color: var(--vscode-descriptionForeground); opacity: 1;
             text-decoration: none;
         }
-        .drawer-link:hover { opacity: 1; color: #cf2d56; }
+        .drawer-link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -1321,7 +1457,7 @@ export class TranslationViewerProvider {
                 </div>
             </div>
             <div class="toolbar-actions">
-                <button type="button" class="toolbar-btn" onclick="syncTranslation()" title="按缓存同步">同步</button>
+                <button type="button" class="toolbar-btn" onclick="syncTranslation()" title="按缓存刷新">刷新</button>
                 <button type="button" class="toolbar-btn" onclick="forceRefreshTranslation()" title="忽略缓存重翻">重翻</button>
                 <button type="button" class="toolbar-btn" onclick="saveTranslation()" title="导出译文">导出</button>
                 <button type="button" class="toolbar-btn" onclick="openDrawer()" title="打开设置">设置</button>
@@ -1384,7 +1520,7 @@ export class TranslationViewerProvider {
     </div>
         <div class="content">
             <div class="content-shell">
-                <article class="view view-preview active" id="previewView">
+                <article class="view view-preview markdown-body active" id="previewView">
                     ${translatedHtml}
                 </article>
                 <section class="view markdown-source" id="markdownView" style="--md-gutter-width:${markdownGutterWidth}px">
@@ -1555,8 +1691,25 @@ export class TranslationViewerProvider {
                 event.stopPropagation();
                 closeProviderMenu();
                 try {
+                    syncProvider(provider);
                     vscode.postMessage({ command: 'changeProvider', provider: provider });
                 } catch (e) {}
+            }
+
+            function setupMarkdownLineHover() {
+                var markdownView = document.getElementById('markdownView');
+                if (!markdownView) return;
+                markdownView.addEventListener('mouseover', function(event) {
+                    var target = event.target;
+                    var line = target && target.closest ? target.closest('.markdown-line') : null;
+                    if (!line) return;
+                    var lineNumber = Number(line.getAttribute('data-line'));
+                    if (!lineNumber) return;
+                    vscode.postMessage({ command: 'hoverSourceLine', line: lineNumber });
+                });
+                markdownView.addEventListener('mouseleave', function() {
+                    vscode.postMessage({ command: 'clearSourceLineHover' });
+                });
             }
 
             function syncProvider(provider) {
@@ -1606,23 +1759,24 @@ export class TranslationViewerProvider {
                 try {
                     var memo = document.getElementById('memo');
                     if (!memo) return;
-                    var providerName = displayName || syncProvider(provider);
+                    var syncedProviderName = syncProvider(provider);
+                    var providerName = displayName || syncedProviderName;
 
                     memo.className = 'memo ' + (state || '');
 
                     if (state === 'loading') {
-                        memo.textContent = '同步中...';
+                        memo.textContent = '刷新中...';
                     } else if (state === 'delta-loading') {
                         var progressText = progress ? ' ' + progress : '';
-                        memo.textContent = '同步改动' + progressText + '...';
+                        memo.textContent = '刷新改动' + progressText + '...';
                     } else if (state === 'delta-completed') {
-                        memo.textContent = '已同步改动，少翻 ' + (savings || 0) + '%';
+                        memo.textContent = '已刷新改动，少翻 ' + (savings || 0) + '%';
                     } else if (state === 'provider-changed') {
-                        memo.textContent = '已切到 ' + providerName + '，译文待同步';
+                        memo.textContent = '已切到 ' + providerName + '，译文待刷新';
                     } else if (state === 'completed') {
                         memo.textContent = '译自 ' + providerName;
                     } else if (state === 'incremental') {
-                        memo.textContent = '已同步改动';
+                        memo.textContent = '已刷新改动';
                     } else {
                         memo.textContent = '译自 ' + providerName;
                     }
@@ -1631,6 +1785,7 @@ export class TranslationViewerProvider {
             
             syncProvider(currentProvider);
             setViewMode(viewMode);
+            setupMarkdownLineHover();
 
             window.saveTranslation = saveTranslation;
             window.syncTranslation = syncTranslation;
@@ -1673,7 +1828,7 @@ export class TranslationViewerProvider {
             const lineHtml = this.highlightMarkdownLine(line);
             const isEmpty = line.length === 0 ? ' is-empty' : '';
             return `
-                <div class="markdown-line">
+                <div class="markdown-line" data-line="${index + 1}">
                     <span class="markdown-line-no">${index + 1}</span>
                     <span class="markdown-line-text${isEmpty}">${lineHtml}</span>
                 </div>
